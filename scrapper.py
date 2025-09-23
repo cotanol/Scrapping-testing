@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 # --- CONFIGURACIÓN ---
 URL_BASE = "https://www.todomueblesdebano.com/marcas/royo/"
-CSV_FILENAME = 'productos_royo_completos.csv'
+CSV_FILENAME = 'productos_royo_completos_detallado.csv'
 
 def get_collection_links(driver, url):
     """
@@ -49,8 +49,6 @@ def get_collection_links(driver, url):
     soup = BeautifulSoup(page_source, 'html.parser')
     
     collection_links = []
-    # --- LÍNEA CORREGIDA AQUÍ ---
-    # Buscamos enlaces donde el atributo 'title' EMPIECE POR 'Ver Colección'
     link_elements = soup.select("a[title^='Ver Colección']")
     
     base_url = "https://www.todomueblesdebano.com"
@@ -66,8 +64,7 @@ def get_collection_links(driver, url):
 
 def scrape_products_from_collection(driver, url, all_products_data):
     """
-    Fase 2: Navega a la URL de una colección específica, hace clic en "Cargar más" productos
-    y extrae la información de todos los productos.
+    Fase 2: Navega a la URL de una colección y extrae TODOS los datos detallados de sus productos.
     """
     driver.get(url)
     print(f"\n--- Accediendo a la colección: {url} ---")
@@ -94,18 +91,43 @@ def scrape_products_from_collection(driver, url, all_products_data):
     
     for container in product_containers:
         try:
-            link_element = container.select_one('a[title^="Ir a"]')
-            price_element = container.select_one('p span.font-bold')
+            # --- EXTRACCIÓN DE DATOS MEJORADA ---
+
+            # Nombre (desde metaetiqueta, más fiable)
+            name_element = container.select_one('meta[itemprop="name"]')
+            name = name_element['content'].strip() if name_element else 'No disponible'
+
+            # Descripción corta
+            desc_element = container.select_one('p.text-sm.mb-1\.5')
+            description = desc_element.text.strip() if desc_element else 'No disponible'
             
-            name = link_element.select_one('h2').text.strip() if link_element and link_element.select_one('h2') else 'No disponible'
-            link = link_element['href'] if link_element else 'No disponible'
+            # Precio
+            price_element = container.select_one('p span.font-bold')
             price = price_element.text.strip() if price_element else 'No disponible'
             
+            # Enlace
+            link_element = container.select_one('a[title^="Ir a"]')
+            link = link_element['href'] if link_element else 'No disponible'
             base_url = "https://www.todomueblesdebano.com"
             if link != 'No disponible' and not link.startswith('http'):
                 link = base_url + link
 
-            all_products_data.append([name, price, link])
+            # Valoración (conteo de estrellas)
+            stars_elements = container.select('div.testimonial img')
+            stars = len(stars_elements) if stars_elements else 0
+            
+            # Número de opiniones
+            reviews_element = container.select_one('div.testimonial p span.grey')
+            reviews_count = reviews_element.text.strip() if reviews_element else '(0)'
+
+            # Colores (se unen en un solo texto)
+            color_elements = container.select('div.colour-list div.colour')
+            colors = [color['title'] for color in color_elements if 'title' in color.attrs]
+            colors_text = ', '.join(colors) if colors else 'No disponible'
+
+            # Se añaden todos los datos a la lista principal
+            all_products_data.append([name, description, price, link, stars, reviews_count, colors_text])
+
         except Exception as e:
             print(f"ADVERTENCIA: No se pudieron extraer todos los datos de un producto. Error: {e}")
             continue
@@ -120,10 +142,8 @@ def main():
     driver = webdriver.Chrome(service=service)
     driver.maximize_window()
     
-    # FASE 1
     collection_links = get_collection_links(driver, URL_BASE)
     
-    # FASE 2
     all_products_data = []
     for link in collection_links:
         scrape_products_from_collection(driver, link, all_products_data)
@@ -132,7 +152,8 @@ def main():
     try:
         with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['Nombre', 'Precio', 'Enlace'])
+            # Escribimos las nuevas cabeceras del CSV
+            writer.writerow(['Nombre', 'Descripción', 'Precio', 'Enlace', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles'])
             writer.writerows(all_products_data)
         print(f"¡ÉXITO! ✨ Se han guardado todos los productos en el archivo '{CSV_FILENAME}'")
     except IOError as e:
