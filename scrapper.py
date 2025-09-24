@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 # --- CONFIGURACIÓN ---
 URL_MARCAS = "https://www.todomueblesdebano.com/marcas/"
-CSV_FILENAME = 'TODOS_LOS_PRODUCTOS.csv'
+CSV_FILENAME = 'TODOS_LOS_PRODUCTOS_FINAL.csv'
 BASE_DOMAIN = "https://www.todomueblesdebano.com"
 
 def get_brand_links(driver, url):
@@ -30,8 +30,6 @@ def get_brand_links(driver, url):
     soup = BeautifulSoup(page_source, 'html.parser')
     
     brands_data = []
-    # --- SELECTOR CORREGIDO AQUÍ ---
-    # Buscamos cada 'caja' que contiene una marca.
     brand_containers = soup.select('div.text-center')
     
     for container in brand_containers:
@@ -42,7 +40,6 @@ def get_brand_links(driver, url):
             relative_url = link_element['href']
             full_url = BASE_DOMAIN + relative_url
             
-            # Evitamos duplicados
             if not any(d['name'] == brand_name for d in brands_data):
                 brands_data.append({'name': brand_name, 'url': full_url})
                 
@@ -51,7 +48,7 @@ def get_brand_links(driver, url):
 
 def get_collection_links(driver, brand_url):
     """
-    FASE 2: Navega a la URL de una marca y extrae los enlaces de sus colecciones.
+    FASE 2: Navega a la URL de una marca y extrae el NOMBRE y el ENLACE de cada colección.
     """
     driver.get(brand_url)
     print(f"\n  FASE 2: Accediendo a la marca: {brand_url}")
@@ -71,29 +68,38 @@ def get_collection_links(driver, brand_url):
     page_source = driver.page_source
     soup = BeautifulSoup(page_source, 'html.parser')
     
-    collection_links = []
-    link_elements = soup.select("a[title^='Ver Colección']")
-    
-    for link in link_elements:
-        href = link.get('href')
-        if href:
-            full_url = BASE_DOMAIN + href
-            if full_url not in collection_links:
-                collection_links.append(full_url)
-                
-    print(f"    -> Se encontraron {len(collection_links)} colecciones para esta marca.")
-    return collection_links
+    collections_data = []
+    collection_containers = soup.select("div.col-span-12.md\\:col-span-6.lg\\:col-span-3")
 
-def scrape_products_from_collection(driver, collection_url, brand_name, all_products_data):
+    for container in collection_containers:
+        name_element = container.select_one("h3")
+        link_element = container.select_one("a[title^='Ver Colección']")
+        
+        if name_element and link_element:
+            collection_name = name_element.text.strip()
+            href = link_element.get('href')
+            full_url = BASE_DOMAIN + href
+            
+            if not any(d['name'] == collection_name for d in collections_data):
+                collections_data.append({'name': collection_name, 'url': full_url})
+                
+    print(f"    -> Se encontraron {len(collections_data)} colecciones para esta marca.")
+    return collections_data
+
+def scrape_products_from_collection(driver, collection_url, brand_name, collection_name, all_products_data):
     """
     FASE 3: Navega a una colección y extrae los datos de sus productos.
     """
     driver.get(collection_url)
-    print(f"\n      FASE 3: Accediendo a la colección: {collection_url}")
+    print(f"\n      FASE 3: Accediendo a la colección '{collection_name}'...")
     
     while True:
         try:
-            load_more_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btn-load-more")))
+            # --- AJUSTE FINAL AQUÍ ---
+            # Ahora busca cualquier botón que contenga la clase 'load-more'
+            load_more_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "button.load-more"))
+            )
             driver.execute_script("arguments[0].scrollIntoView();", load_more_button)
             time.sleep(1)
             load_more_button.click()
@@ -130,7 +136,7 @@ def scrape_products_from_collection(driver, collection_url, brand_name, all_prod
             colors = [color['title'] for color in color_elements if 'title' in color.attrs]
             colors_text = ', '.join(colors) if colors else 'No disponible'
 
-            all_products_data.append([brand_name, name, description, price, stars, reviews_count, colors_text, link])
+            all_products_data.append([brand_name, collection_name, name, description, price, stars, reviews_count, colors_text, link])
         except Exception as e:
             print(f"ADVERTENCIA: No se pudieron extraer datos de un producto. Error: {e}")
             continue
@@ -145,28 +151,25 @@ def main():
     driver = webdriver.Chrome(service=service)
     driver.maximize_window()
     
-    # FASE 1: Obtener todas las marcas
     brands_data = get_brand_links(driver, URL_MARCAS)
     
     all_products_data = []
-    # Bucle principal que itera sobre cada marca
     for brand in brands_data:
         brand_name = brand['name']
         brand_url = brand['url']
         
-        # FASE 2: Obtener todas las colecciones para la marca actual
-        collection_links = get_collection_links(driver, brand_url)
+        collections_data = get_collection_links(driver, brand_url)
         
-        # Bucle secundario que itera sobre cada colección
-        for collection_url in collection_links:
-            # FASE 3: Obtener todos los productos, pasando el nombre de la marca
-            scrape_products_from_collection(driver, collection_url, brand_name, all_products_data)
+        for collection in collections_data:
+            collection_name = collection['name']
+            collection_url = collection['url']
+            scrape_products_from_collection(driver, collection_url, brand_name, collection_name, all_products_data)
             
     print(f"\nPROCESO COMPLETADO. Se encontraron un total de {len(all_products_data)} productos.")
     try:
         with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['Marca', 'Nombre', 'Descripción', 'Precio', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles', 'Enlace'])
+            writer.writerow(['Marca', 'Colección', 'Nombre', 'Descripción', 'Precio', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles', 'Enlace'])
             writer.writerows(all_products_data)
         print(f"¡ÉXITO! ✨ Se han guardado todos los productos en el archivo '{CSV_FILENAME}'")
     except IOError as e:
