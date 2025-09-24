@@ -8,154 +8,165 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 
 # --- CONFIGURACIÓN ---
-URL_BASE = "https://www.todomueblesdebano.com/marcas/royo/"
-CSV_FILENAME = 'productos_royo_completos_detallado.csv'
+URL_MARCAS = "https://www.todomueblesdebano.com/marcas/"
+CSV_FILENAME = 'TODOS_LOS_PRODUCTOS.csv'
+BASE_DOMAIN = "https://www.todomueblesdebano.com"
 
-def get_collection_links(driver, url):
+def get_brand_links(driver, url):
     """
-    Fase 1: Navega a la URL principal, hace clic en "Ver más colecciones" 
-    y extrae todos los enlaces a las páginas de cada colección.
+    FASE 1: Navega a la página de marcas y extrae el nombre y la URL de cada una.
     """
     driver.get(url)
-    print(f"Accediendo a la página principal de la marca: {url}")
+    print(f"FASE 1: Accediendo a la página de todas las marcas: {url}")
     
     try:
         print("Buscando y aceptando el banner de cookies...")
-        accept_cookies_button = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.ID, "accept-cookies"))
-        )
-        accept_cookies_button.click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "accept-cookies"))).click()
         print("Cookies aceptadas.")
     except Exception:
         print("No se encontró el banner de cookies o ya fue aceptado.")
         
-    print("Buscando y haciendo clic en 'Ver más colecciones'...")
+    page_source = driver.page_source
+    soup = BeautifulSoup(page_source, 'html.parser')
+    
+    brands_data = []
+    # --- SELECTOR CORREGIDO AQUÍ ---
+    # Buscamos cada 'caja' que contiene una marca.
+    brand_containers = soup.select('div.text-center')
+    
+    for container in brand_containers:
+        link_element = container.find('a', href=True)
+        name_element = container.find('h3')
+        if link_element and name_element:
+            brand_name = name_element.text.strip()
+            relative_url = link_element['href']
+            full_url = BASE_DOMAIN + relative_url
+            
+            # Evitamos duplicados
+            if not any(d['name'] == brand_name for d in brands_data):
+                brands_data.append({'name': brand_name, 'url': full_url})
+                
+    print(f"Se encontraron {len(brands_data)} marcas.")
+    return brands_data
+
+def get_collection_links(driver, brand_url):
+    """
+    FASE 2: Navega a la URL de una marca y extrae los enlaces de sus colecciones.
+    """
+    driver.get(brand_url)
+    print(f"\n  FASE 2: Accediendo a la marca: {brand_url}")
+    
     while True:
         try:
-            load_more_collections_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button.load-more"))
-            )
-            driver.execute_script("arguments[0].scrollIntoView();", load_more_collections_button)
+            load_more_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.load-more")))
+            driver.execute_script("arguments[0].scrollIntoView();", load_more_button)
             time.sleep(1)
-            load_more_collections_button.click()
-            print("Botón 'Ver más colecciones' presionado.")
+            load_more_button.click()
+            print("    -> Clic en 'Ver más colecciones'...")
             time.sleep(2)
         except Exception:
-            print("No se encontró más el botón 'Ver más colecciones'.")
+            print("    -> No hay más colecciones que cargar.")
             break
             
-    print("\nExtrayendo enlaces de todas las colecciones...")
     page_source = driver.page_source
     soup = BeautifulSoup(page_source, 'html.parser')
     
     collection_links = []
     link_elements = soup.select("a[title^='Ver Colección']")
     
-    base_url = "https://www.todomueblesdebano.com"
     for link in link_elements:
         href = link.get('href')
         if href:
-            full_url = base_url + href
+            full_url = BASE_DOMAIN + href
             if full_url not in collection_links:
                 collection_links.append(full_url)
                 
-    print(f"Se encontraron {len(collection_links)} enlaces de colecciones.")
+    print(f"    -> Se encontraron {len(collection_links)} colecciones para esta marca.")
     return collection_links
 
-def scrape_products_from_collection(driver, url, all_products_data):
+def scrape_products_from_collection(driver, collection_url, brand_name, all_products_data):
     """
-    Fase 2: Navega a la URL de una colección y extrae TODOS los datos detallados de sus productos.
+    FASE 3: Navega a una colección y extrae los datos de sus productos.
     """
-    driver.get(url)
-    print(f"\n--- Accediendo a la colección: {url} ---")
+    driver.get(collection_url)
+    print(f"\n      FASE 3: Accediendo a la colección: {collection_url}")
     
     while True:
         try:
-            load_more_products_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btn-load-more"))
-            )
-            driver.execute_script("arguments[0].scrollIntoView();", load_more_products_button)
+            load_more_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btn-load-more")))
+            driver.execute_script("arguments[0].scrollIntoView();", load_more_button)
             time.sleep(1)
-            load_more_products_button.click()
-            print("Botón 'Cargar más' (productos) presionado.")
+            load_more_button.click()
+            print("        -> Clic en 'Cargar más' productos...")
             time.sleep(2)
         except Exception:
-            print("No se encontró más el botón 'Cargar más' (productos) en esta página.")
+            print("        -> No hay más productos que cargar.")
             break
             
     page_source = driver.page_source
     soup = BeautifulSoup(page_source, 'html.parser')
     
     product_containers = soup.select('div.product-snippet')
-    print(f"Se encontraron {len(product_containers)} productos en esta colección.")
+    print(f"        -> Se encontraron {len(product_containers)} productos.")
     
     for container in product_containers:
         try:
-            # --- EXTRACCIÓN DE DATOS MEJORADA ---
-
-            # Nombre (desde metaetiqueta, más fiable)
             name_element = container.select_one('meta[itemprop="name"]')
             name = name_element['content'].strip() if name_element else 'No disponible'
-
-            # Descripción corta
             desc_element = container.select_one('p.text-sm.mb-1\.5')
             description = desc_element.text.strip() if desc_element else 'No disponible'
-            
-            # Precio
             price_element = container.select_one('p span.font-bold')
             price = price_element.text.strip() if price_element else 'No disponible'
-            
-            # Enlace
             link_element = container.select_one('a[title^="Ir a"]')
             link = link_element['href'] if link_element else 'No disponible'
-            base_url = "https://www.todomueblesdebano.com"
             if link != 'No disponible' and not link.startswith('http'):
-                link = base_url + link
-
-            # Valoración (conteo de estrellas)
+                link = BASE_DOMAIN + link
             stars_elements = container.select('div.testimonial img')
             stars = len(stars_elements) if stars_elements else 0
-            
-            # Número de opiniones
             reviews_element = container.select_one('div.testimonial p span.grey')
             raw_reviews_count = reviews_element.text.strip() if reviews_element else '(0)'
-            # AJUSTE: Limpiamos los paréntesis
             reviews_count = raw_reviews_count.strip('()')
-
-            # Colores (se unen en un solo texto)
             color_elements = container.select('div.colour-list div.colour')
             colors = [color['title'] for color in color_elements if 'title' in color.attrs]
             colors_text = ', '.join(colors) if colors else 'No disponible'
 
-            # AJUSTE: Se añade a la lista principal con el nuevo orden de columnas
-            all_products_data.append([name, description, price, stars, reviews_count, colors_text, link])
-
+            all_products_data.append([brand_name, name, description, price, stars, reviews_count, colors_text, link])
         except Exception as e:
-            print(f"ADVERTENCIA: No se pudieron extraer todos los datos de un producto. Error: {e}")
+            print(f"ADVERTENCIA: No se pudieron extraer datos de un producto. Error: {e}")
             continue
 
 def main():
     """
-    Función principal que orquesta todo el proceso.
+    Función principal que orquesta todo el proceso de 3 fases.
     """
-    print("Iniciando el proceso de scraping...")
+    print("Iniciando el proceso de scraping masivo...")
     
     service = Service(executable_path='chromedriver.exe')
     driver = webdriver.Chrome(service=service)
     driver.maximize_window()
     
-    collection_links = get_collection_links(driver, URL_BASE)
+    # FASE 1: Obtener todas las marcas
+    brands_data = get_brand_links(driver, URL_MARCAS)
     
     all_products_data = []
-    for link in collection_links:
-        scrape_products_from_collection(driver, link, all_products_data)
+    # Bucle principal que itera sobre cada marca
+    for brand in brands_data:
+        brand_name = brand['name']
+        brand_url = brand['url']
         
-    print(f"\nProceso completado. Se encontraron un total de {len(all_products_data)} productos.")
+        # FASE 2: Obtener todas las colecciones para la marca actual
+        collection_links = get_collection_links(driver, brand_url)
+        
+        # Bucle secundario que itera sobre cada colección
+        for collection_url in collection_links:
+            # FASE 3: Obtener todos los productos, pasando el nombre de la marca
+            scrape_products_from_collection(driver, collection_url, brand_name, all_products_data)
+            
+    print(f"\nPROCESO COMPLETADO. Se encontraron un total de {len(all_products_data)} productos.")
     try:
         with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            # AJUSTE: Escribimos las cabeceras del CSV con el nuevo orden
-            writer.writerow(['Nombre', 'Descripción', 'Precio', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles', 'Enlace'])
+            writer.writerow(['Marca', 'Nombre', 'Descripción', 'Precio', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles', 'Enlace'])
             writer.writerows(all_products_data)
         print(f"¡ÉXITO! ✨ Se han guardado todos los productos en el archivo '{CSV_FILENAME}'")
     except IOError as e:
