@@ -118,15 +118,17 @@ def scrape_products_from_collection(driver, url, all_products_data):
             
             # Número de opiniones
             reviews_element = container.select_one('div.testimonial p span.grey')
-            reviews_count = reviews_element.text.strip() if reviews_element else '(0)'
+            raw_reviews_count = reviews_element.text.strip() if reviews_element else '(0)'
+            # AJUSTE: Limpiamos los paréntesis
+            reviews_count = raw_reviews_count.strip('()')
 
             # Colores (se unen en un solo texto)
             color_elements = container.select('div.colour-list div.colour')
             colors = [color['title'] for color in color_elements if 'title' in color.attrs]
             colors_text = ', '.join(colors) if colors else 'No disponible'
 
-            # Se añaden todos los datos a la lista principal
-            all_products_data.append([name, description, price, link, stars, reviews_count, colors_text])
+            # AJUSTE: Se añade a la lista principal con el nuevo orden de columnas
+            all_products_data.append([name, description, price, stars, reviews_count, colors_text, link])
 
         except Exception as e:
             print(f"ADVERTENCIA: No se pudieron extraer todos los datos de un producto. Error: {e}")
@@ -152,8 +154,8 @@ def main():
     try:
         with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            # Escribimos las nuevas cabeceras del CSV
-            writer.writerow(['Nombre', 'Descripción', 'Precio', 'Enlace', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles'])
+            # AJUSTE: Escribimos las cabeceras del CSV con el nuevo orden
+            writer.writerow(['Nombre', 'Descripción', 'Precio', 'Valoración (Estrellas)', 'Número de Opiniones', 'Colores Disponibles', 'Enlace'])
             writer.writerows(all_products_data)
         print(f"¡ÉXITO! ✨ Se han guardado todos los productos en el archivo '{CSV_FILENAME}'")
     except IOError as e:
