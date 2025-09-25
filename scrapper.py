@@ -12,6 +12,12 @@ URL_MARCAS = "https://www.todomueblesdebano.com/marcas/"
 CSV_FILENAME = 'TODOS_LOS_PRODUCTOS_FINAL.csv'
 BASE_DOMAIN = "https://www.todomueblesdebano.com"
 
+# --- VARIABLES GLOBALES DE TIEMPO (AJUSTADAS) ---
+WAIT_FOR_ELEMENT = 10
+WAIT_FOR_BUTTON = 5
+PAUSE_AFTER_CLICK = 3  # Aumentado a 3 segundos para más fiabilidad
+PAUSE_SHORT = 1
+
 def get_brand_links(driver, url):
     """
     FASE 1: Navega a la página de marcas y extrae el nombre y la URL de cada una.
@@ -21,7 +27,7 @@ def get_brand_links(driver, url):
     
     try:
         print("Buscando y aceptando el banner de cookies...")
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "accept-cookies"))).click()
+        WebDriverWait(driver, WAIT_FOR_ELEMENT).until(EC.element_to_be_clickable((By.ID, "accept-cookies"))).click()
         print("Cookies aceptadas.")
     except Exception:
         print("No se encontró el banner de cookies o ya fue aceptado.")
@@ -55,12 +61,12 @@ def get_collection_links(driver, brand_url):
     
     while True:
         try:
-            load_more_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.load-more")))
+            load_more_button = WebDriverWait(driver, WAIT_FOR_BUTTON).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.load-more")))
             driver.execute_script("arguments[0].scrollIntoView();", load_more_button)
-            time.sleep(1)
+            time.sleep(PAUSE_SHORT)
             load_more_button.click()
             print("    -> Clic en 'Ver más colecciones'...")
-            time.sleep(2)
+            time.sleep(PAUSE_AFTER_CLICK)
         except Exception:
             print("    -> No hay más colecciones que cargar.")
             break
@@ -95,24 +101,30 @@ def scrape_products_from_collection(driver, collection_url, brand_name, collecti
     
     while True:
         try:
-            # --- AJUSTE FINAL AQUÍ ---
-            # Ahora busca cualquier botón que contenga la clase 'load-more'
-            load_more_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button.load-more"))
+            # --- SELECTOR MÁS INTELIGENTE AQUÍ ---
+            # Busca un botón con la clase 'load-more' Y que contenga el texto "Cargar Mas"
+            load_more_button = WebDriverWait(driver, WAIT_FOR_BUTTON).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'load-more') and contains(text(), 'Cargar Mas')]"))
             )
             driver.execute_script("arguments[0].scrollIntoView();", load_more_button)
-            time.sleep(1)
+            time.sleep(PAUSE_SHORT)
             load_more_button.click()
-            print("        -> Clic en 'Cargar más' productos...")
-            time.sleep(2)
+            print("        -> Clic en 'Cargar Mas' productos...")
+            time.sleep(PAUSE_AFTER_CLICK)
         except Exception:
-            print("        -> No hay más productos que cargar.")
+            print("        -> No hay más productos que cargar (o el botón no es 'Cargar Mas').")
             break
             
     page_source = driver.page_source
     soup = BeautifulSoup(page_source, 'html.parser')
     
     product_containers = soup.select('div.product-snippet')
+    
+    # Si no se encuentran productos, lo indicamos y salimos de la función.
+    if not product_containers:
+        print("        -> Se encontraron 0 productos en esta colección.")
+        return # Termina la extracción para esta colección
+
     print(f"        -> Se encontraron {len(product_containers)} productos.")
     
     for container in product_containers:
