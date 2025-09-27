@@ -1,0 +1,162 @@
+import time
+import json
+import csv
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+
+# --- IMPORTAMOS NUESTROS MÓDULOS EXPERTOS ---
+from get_urls_by_brand import get_all_product_urls_from_brand
+from producto_combinaciones_final import scrape_all_product_combinations
+
+# --- CONFIGURACIÓN ---
+BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/oasis-star/"
+CSV_FILENAME = "reporte_final_marca.csv" # <-- Volvemos a CSV
+WAIT_TIMEOUT = 10
+PAUSE_DURATION = 2
+
+def scrape_basic_product_details(soup):
+    """Extrae los datos básicos visibles en la página de detalles de un producto."""
+    details = {}
+    details['Nombre'] = soup.select_one("h1 span.font-semibold").text.strip() if soup.select_one("h1 span.font-semibold") else 'No disponible'
+    details['Subtitulo'] = soup.select_one("h1 span.subname").text.strip() if soup.select_one("h1 span.subname") else ''
+    details['Precio Actual'] = soup.select_one("span.price").text.strip() if soup.select_one("span.price") else 'No disponible'
+    details['Precio Antiguo'] = soup.select_one("span.line-through").text.strip() if soup.select_one("span.line-through") else ''
+    details['Descuento'] = soup.select_one("span.bg-yellow-300").text.strip().replace('\n', '').replace(' ', '') if soup.select_one("span.bg-yellow-300") else ''
+    details['Referencia'] = soup.select_one("div.ref-container").text.strip() if soup.select_one("div.ref-container") else ''
+    return details
+
+def scrape_description_sidebar(driver):
+    """Hace clic en 'Descripción', extrae el texto del panel y lo cierra."""
+    try:
+        print("    -> Buscando 'Descripción del producto'...")
+        desc_button = WebDriverWait(driver, WAIT_TIMEOUT).until(
+            EC.element_to_be_clickable((By.XPATH, "//h2[contains(., 'Descripción del producto')]"))
+        )
+        driver.execute_script("arguments[0].click();", desc_button)
+        
+        WebDriverWait(driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.body-sidebar")))
+        print("    -> Panel de descripción abierto.")
+        time.sleep(PAUSE_DURATION)
+        
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        desc_container = soup.select_one("div.body-sidebar div.text-base")
+        description_text = desc_container.get_text(separator='\n', strip=True) if desc_container else "No disponible"
+        
+        close_button = driver.find_element(By.CSS_SELECTOR, "div.header-sidebar button[type='button']")
+        driver.execute_script("arguments[0].click();", close_button)
+        
+        time.sleep(PAUSE_DURATION)
+        print("    -> Panel de descripción cerrado.")
+        return description_text
+    except Exception:
+        print("    -> No se encontró o no se pudo procesar la descripción completa.")
+        return "No disponible"
+
+def scrape_tech_sheet_sidebar(driver):
+    """Hace clic en 'Ficha técnica', extrae los datos y enlaces del panel, y lo cierra."""
+    tech_data_text = "No disponible"
+    url_montaje = "No disponible"
+    url_ficha = "No disponible"
+    try:
+        print("    -> Buscando 'Consulta la ficha técnica'...")
+        sheet_button = WebDriverWait(driver, WAIT_TIMEOUT).until(
+            EC.element_to_be_clickable((By.XPATH, "//h2[contains(., 'Consulta la ficha técnica')]"))
+        )
+        driver.execute_script("arguments[0].click();", sheet_button)
+
+        WebDriverWait(driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.body-sidebar")))
+        print("    -> Panel de ficha técnica abierto.")
+        time.sleep(PAUSE_DURATION)
+
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        
+        tech_container = soup.select_one("div.product-description-component")
+        if tech_container:
+            tech_data_text = tech_container.get_text(separator='\n', strip=True)
+
+        montaje_link = soup.find('a', string=lambda t: t and 'instrucciones de montaje' in t.lower().strip())
+        if montaje_link:
+            url_montaje = montaje_link['href']
+
+        ficha_link = soup.find('a', string=lambda t: t and 'descargar ficha tecnica' in t.lower().strip())
+        if ficha_link:
+            url_ficha = ficha_link['href']
+
+        close_button = driver.find_element(By.CSS_SELECTOR, "div.header-sidebar button[type='button']")
+        driver.execute_script("arguments[0].click();", close_button)
+        
+        time.sleep(PAUSE_DURATION)
+        print("    -> Panel de ficha técnica cerrado.")
+
+    except Exception:
+        print("    -> No se encontró o no se pudo procesar la ficha técnica.")
+    
+    return tech_data_text, url_montaje, url_ficha
+
+# --- FUNCIÓN PRINCIPAL / ORQUESTADOR ---
+def main():
+    print(f"--- INICIANDO SCRAPER MASIVO PARA LA MARCA: {BRAND_URL_TO_SCRAPE} ---")
+    service = Service(executable_path='chromedriver.exe')
+    driver = webdriver.Chrome(service=service)
+    driver.maximize_window()
+
+    product_urls_with_context = get_all_product_urls_from_brand(driver, BRAND_URL_TO_SCRAPE)
+    all_products_final_data = []
+
+    for product_info in product_urls_with_context:
+        product_url = product_info['url']
+        brand_name = product_info['marca']
+        collection_name = product_info['coleccion']
+        
+        print(f"\n--- PROCESANDO PRODUCTO: {product_url} ---")
+        driver.get(product_url)
+        time.sleep(2)
+        
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        
+        basic_details = scrape_basic_product_details(soup)
+        combinations_data = scrape_all_product_combinations(driver, product_url)
+        full_description = scrape_description_sidebar(driver)
+        time.sleep(1)
+        tech_sheet_text, montaje_url, ficha_url = scrape_tech_sheet_sidebar(driver)
+        
+        # --- CAMBIO CLAVE: CONVERTIMOS A JSON ANTES DE GUARDAR ---
+        final_product_data = {
+            'Marca': brand_name,
+            'Coleccion': collection_name,
+            'Nombre': basic_details.get('Nombre', 'No disponible'),
+            'Subtitulo': basic_details.get('Subtitulo', ''),
+            'Referencia': basic_details.get('Referencia', ''),
+            'Precio Actual': basic_details.get('Precio Actual', 'No disponible'),
+            'Precio Antiguo': basic_details.get('Precio Antiguo', ''),
+            'Descuento': basic_details.get('Descuento', ''),
+            'Combinaciones': json.dumps(combinations_data, ensure_ascii=False),
+            'Descripción Completa': json.dumps(full_description, ensure_ascii=False),
+            'Ficha Técnica': json.dumps(tech_sheet_text, ensure_ascii=False),
+            'URL Instrucciones Montaje': montaje_url,
+            'URL Ficha Tecnica': ficha_url,
+            'Enlace': product_url
+        }
+        all_products_final_data.append(final_product_data)
+
+    # --- CAMBIO CLAVE: GUARDAMOS EN CSV ---
+    if all_products_final_data:
+        print(f"\n--- PROCESO COMPLETADO: Se procesaron {len(all_products_final_data)} productos. Guardando en CSV... ---")
+        headers = list(all_products_final_data[0].keys())
+        try:
+            with open(CSV_FILENAME, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(all_products_final_data)
+            print(f"¡ÉXITO! ✨ Datos guardados en '{CSV_FILENAME}'")
+        except IOError as e:
+            print(f"ERROR al escribir el archivo CSV: {e}")
+
+    driver.quit()
+
+if __name__ == "__main__":
+    main()
