@@ -7,30 +7,20 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 
-# --- CONFIGURACIÓN ---
-PRODUCT_URL = "https://www.todomueblesdebano.com/conjunto-mueble-de-bano-royo-nisy-2-cajones.html"
-JSON_FILENAME = 'producto_combinaciones_final.json'
-BASE_DOMAIN = "https://www.todomueblesdebano.com"
-
-# --- VARIABLES GLOBALES DE TIEMPO ---
+# --- CONFIGURACIÓN DE TIEMPOS ---
 WAIT_TIMEOUT = 10
-WAIT_FOR_BUTTON = 5
-PAUSE_AFTER_CLICK = 3
-PAUSE_SHORT = 1
-PAUSE_COMPLEMENTS = 1.5 # <-- AJUSTE: Aumentado para dar más tiempo al volver
+PAUSE_AFTER_CLICK = 2
+PAUSE_COMPLEMENTS = 1.5
 
 def get_current_view_data(soup):
-    """
-    Función auxiliar para extraer los datos de la vista actual del panel.
-    """
+    """Función auxiliar para extraer los datos de la vista actual del panel."""
     items_list = []
-    item_containers = soup.select("div.colour-item, div.product-attribute-list-comp")
-    
+    item_containers = soup.select("div.colour-item, div.product-attribute-list-component")
     for item in item_containers:
+        subtitle = ''
         if 'colour-item' in item.get('class', []):
             name = item.get('title', 'N/A').replace('color ', '')
             price = 'N/A'
-            subtitle = ''
         else:
             name_elem = item.select_one("span.font-normal, span.font-medium")
             subtitle_elem = item.select_one("span.text-xs")
@@ -38,15 +28,25 @@ def get_current_view_data(soup):
             name = name_elem.text.strip() if name_elem else 'N/A'
             subtitle = subtitle_elem.text.strip() if subtitle_elem else ''
             price = price_elem.text.strip() if price_elem else 'N/A'
-            
         items_list.append({'nombre': name, 'subtitulo': subtitle, 'precio_extra': price})
     return items_list
 
-def scrape_product_configuration(driver):
+# --- FUNCIÓN REUTILIZABLE ---
+def scrape_all_product_combinations(driver, product_url):
     """
-    Función principal que abre el configurador y navega por TODAS las opciones.
+    Función experta que recibe un driver y una URL, y devuelve un diccionario
+    con todas las combinaciones extraídas del configurador del producto.
     """
+    driver.get(product_url)
+    print(f"\n--- Analizando producto: {product_url} ---")
+    
     full_configuration = {}
+
+    try:
+        WebDriverWait(driver, WAIT_TIMEOUT).until(EC.element_to_be_clickable((By.ID, "accept-cookies"))).click()
+        print("Cookies aceptadas.")
+    except Exception:
+        print("Banner de cookies no encontrado o ya aceptado.")
 
     try:
         print("-> Abriendo el configurador de producto...")
@@ -64,61 +64,48 @@ def scrape_product_configuration(driver):
         try:
             time.sleep(PAUSE_AFTER_CLICK)
             
+            # --- LÓGICA RESTAURADA ---
+            # Antes de extraer, siempre busca un posible botón "Ver más" para expandir la lista
             try:
-                view_more_button = driver.find_element(By.XPATH, "//span[contains(text(), 'Ver más')]")
-                print("  -> Encontrado botón 'Ver más' dentro del panel. Haciendo clic...")
-                view_more_button.click()
-                time.sleep(PAUSE_AFTER_CLICK)
+                view_more_button = driver.find_element(By.XPATH, "//span[contains(@class, 'underline') and contains(text(), 'Ver más')]")
+                print("  -> Encontrado botón 'Ver más' interno. Haciendo clic...")
+                driver.execute_script("arguments[0].click();", view_more_button)
+                time.sleep(PAUSE_AFTER_CLICK) # Espera a que se carguen los nuevos items
             except Exception:
-                pass
-            
+                pass # Si no existe, no hace nada
+
             soup = BeautifulSoup(driver.page_source, 'html.parser')
-            
             title_element = soup.select_one("div.product-description-component span.text-xl, div.product-description-component span.text-2xl")
             section_title = title_element.text.strip() if title_element else "Desconocido"
-            print(f"\n--- Extrayendo datos de: '{section_title}' ---")
+            print(f"--- Extrayendo datos de: '{section_title}' ---")
 
             if "complementos" in section_title.lower():
-                print("  -> Detectada sección compleja 'Complementos'.")
                 complements_data = {}
                 category_buttons = driver.find_elements(By.CSS_SELECTOR, "a.cat-list-component-link")
                 category_names = [btn.text.split('\n')[0] for btn in category_buttons]
                 
                 for i in range(len(category_names)):
+                    # Vuelve a buscar los botones para evitar errores de 'stale element'
                     driver.find_elements(By.CSS_SELECTOR, "a.cat-list-component-link")[i].click()
                     current_cat_name = category_names[i]
                     print(f"    -> Entrando a sub-categoría: '{current_cat_name}'...")
-                    
-                    time.sleep(PAUSE_COMPLEMENTS) 
-                    WebDriverWait(driver, WAIT_TIMEOUT).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.product-attribute-list-comp"))
-                    )
-                    
-                    sub_soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    sub_section_title_elem = sub_soup.select_one("div.product-description-component span.text-xl")
-                    sub_section_title = sub_section_title_elem.text.strip() if sub_section_title_elem else current_cat_name
-                    complements_data[sub_section_title] = get_current_view_data(sub_soup)
-                    
+                    time.sleep(PAUSE_COMPLEMENTS)
+                    WebDriverWait(driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.product-attribute-list-comp")))
+                    complements_data[current_cat_name] = get_current_view_data(BeautifulSoup(driver.page_source, 'html.parser'))
                     WebDriverWait(driver, WAIT_TIMEOUT).until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'go-back-sidebar') and (contains(., 'Volver'))]"))).click()
-                    print(f"    -> Volviendo a la lista de complementos.")
-
-                    time.sleep(PAUSE_COMPLEMENTS) 
-                    WebDriverWait(driver, WAIT_TIMEOUT).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "a.cat-list-component-link"))
-                    )
+                    time.sleep(PAUSE_COMPLEMENTS)
+                    WebDriverWait(driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.cat-list-component-link")))
                 
                 full_configuration[section_title] = complements_data
-                print("  -> Buscando botón 'Finalizar' para cerrar.")
                 driver.find_element(By.XPATH, "//button[contains(text(), 'Finalizar')]").click()
+                print("  -> Clic en Finalizar.")
                 break
             else:
                 data = get_current_view_data(soup)
                 full_configuration[section_title] = data
                 print(f"  -> Se encontraron {len(data)} opciones.")
-                
-                print("  -> Buscando botón 'Continuar'...")
                 driver.find_element(By.XPATH, "//button[contains(text(), 'Continuar')]").click()
-                print("  -> Pasando a la siguiente sección...")
+                print("  -> Clic en Continuar.")
         
         except Exception:
             print("\n-> Fin del configurador (no se encontró 'Continuar' o 'Finalizar').")
@@ -126,32 +113,3 @@ def scrape_product_configuration(driver):
             
     return full_configuration
 
-def main():
-    print("Iniciando scraper de configuración de producto...")
-    service = Service(executable_path='chromedriver.exe')
-    driver = webdriver.Chrome(service=service)
-    driver.maximize_window()
-    driver.get(PRODUCT_URL)
-    
-    try:
-        WebDriverWait(driver, WAIT_TIMEOUT).until(EC.element_to_be_clickable((By.ID, "accept-cookies"))).click()
-        print("Cookies aceptadas.")
-    except Exception:
-        print("Banner de cookies no encontrado.")
-
-    product_config = scrape_product_configuration(driver)
-
-    final_json = {"Combinaciones": product_config}
-
-    if product_config:
-        try:
-            with open(JSON_FILENAME, 'w', encoding='utf-8') as f:
-                json.dump(final_json, f, ensure_ascii=False, indent=4)
-            print(f"\n¡ÉXITO! ✨ Configuración completa guardada en '{JSON_FILENAME}'")
-        except IOError:
-            print("\nERROR al escribir el archivo JSON.")
-            
-    driver.quit()
-
-if __name__ == "__main__":
-    main()
