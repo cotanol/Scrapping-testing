@@ -38,15 +38,9 @@ def scrape_all_product_combinations(driver, product_url):
     con todas las combinaciones extraídas del configurador del producto.
     """
     driver.get(product_url)
-    print(f"\n--- Analizando producto: {product_url} ---")
+    print(f"\n--- Analizando combinaciones para: {product_url} ---")
     
     full_configuration = {}
-
-    try:
-        WebDriverWait(driver, WAIT_TIMEOUT).until(EC.element_to_be_clickable((By.ID, "accept-cookies"))).click()
-        print("Cookies aceptadas.")
-    except Exception:
-        print("Banner de cookies no encontrado o ya aceptado.")
 
     try:
         print("-> Abriendo el configurador de producto...")
@@ -56,39 +50,34 @@ def scrape_all_product_combinations(driver, product_url):
         entry_point.click()
         WebDriverWait(driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.header-sidebar")))
         print("-> Configurador abierto.")
-    except Exception as e:
-        print(f"-> No se pudo abrir el configurador. Error: {e}")
-        return {}
+    except Exception:
+        print(f"-> Este producto no parece tener un configurador de opciones.")
+        return {"Combinaciones": {}}
 
     while True:
         try:
             time.sleep(PAUSE_AFTER_CLICK)
-            
-            # --- LÓGICA RESTAURADA ---
-            # Antes de extraer, siempre busca un posible botón "Ver más" para expandir la lista
             try:
                 view_more_button = driver.find_element(By.XPATH, "//span[contains(@class, 'underline') and contains(text(), 'Ver más')]")
-                print("  -> Encontrado botón 'Ver más' interno. Haciendo clic...")
                 driver.execute_script("arguments[0].click();", view_more_button)
-                time.sleep(PAUSE_AFTER_CLICK) # Espera a que se carguen los nuevos items
+                time.sleep(PAUSE_AFTER_CLICK)
             except Exception:
-                pass # Si no existe, no hace nada
-
+                pass
+            
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             title_element = soup.select_one("div.product-description-component span.text-xl, div.product-description-component span.text-2xl")
             section_title = title_element.text.strip() if title_element else "Desconocido"
             print(f"--- Extrayendo datos de: '{section_title}' ---")
 
             if "complementos" in section_title.lower():
+                # (La lógica de complementos no cambia)
                 complements_data = {}
                 category_buttons = driver.find_elements(By.CSS_SELECTOR, "a.cat-list-component-link")
                 category_names = [btn.text.split('\n')[0] for btn in category_buttons]
                 
                 for i in range(len(category_names)):
-                    # Vuelve a buscar los botones para evitar errores de 'stale element'
                     driver.find_elements(By.CSS_SELECTOR, "a.cat-list-component-link")[i].click()
                     current_cat_name = category_names[i]
-                    print(f"    -> Entrando a sub-categoría: '{current_cat_name}'...")
                     time.sleep(PAUSE_COMPLEMENTS)
                     WebDriverWait(driver, WAIT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.product-attribute-list-comp")))
                     complements_data[current_cat_name] = get_current_view_data(BeautifulSoup(driver.page_source, 'html.parser'))
@@ -98,18 +87,27 @@ def scrape_all_product_combinations(driver, product_url):
                 
                 full_configuration[section_title] = complements_data
                 driver.find_element(By.XPATH, "//button[contains(text(), 'Finalizar')]").click()
-                print("  -> Clic en Finalizar.")
                 break
             else:
+                # --- LÓGICA DE NAVEGACIÓN MEJORADA ---
                 data = get_current_view_data(soup)
                 full_configuration[section_title] = data
                 print(f"  -> Se encontraron {len(data)} opciones.")
-                driver.find_element(By.XPATH, "//button[contains(text(), 'Continuar')]").click()
-                print("  -> Clic en Continuar.")
+                
+                try:
+                    # Prioridad 1: Intentar continuar
+                    continue_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Continuar')]")
+                    continue_button.click()
+                    print("  -> Pasando a la siguiente sección...")
+                except:
+                    # Prioridad 2: Si no, intentar finalizar
+                    finish_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Finalizar')]")
+                    finish_button.click()
+                    print("  -> Clic en 'Finalizar', cerrando configurador.")
+                    break # Salimos del bucle principal
         
         except Exception:
-            print("\n-> Fin del configurador (no se encontró 'Continuar' o 'Finalizar').")
+            print("\n-> Fin del configurador (no se encontró 'Continuar' ni 'Finalizar').")
             break
             
-    return full_configuration
-
+    return {"Combinaciones": full_configuration}

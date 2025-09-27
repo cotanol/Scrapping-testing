@@ -13,7 +13,7 @@ from get_urls_by_brand import get_all_product_urls_from_brand
 from producto_combinaciones_final import scrape_all_product_combinations
 
 # --- CONFIGURACIÓN ---
-BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/oasis-star/"
+BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/sergio-luppi/"
 CSV_FILENAME = "reporte_final_marca.csv" # <-- Volvemos a CSV
 WAIT_TIMEOUT = 10
 PAUSE_DURATION = 2
