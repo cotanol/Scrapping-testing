@@ -49,7 +49,7 @@ Para realizar pruebas, se recomiendan estas marcas con pocas colecciones:
 
 - **Sergio Luppi**: https://www.todomueblesdebano.com/marcas/sergio-luppi/
 - **Sagobar**: https://www.todomueblesdebano.com/marcas/sagobar/
-  _(Nota: Algunos productos tienen elementos duplicados como doble botón de ficha técnica)_
+  _(Nota: Algunos productos tienen elementos duplicados como doble botón de ficha técnica, aunque parece que is funciona correctamente y no se duplica en su columna)_
 - **Oasis Star**: https://www.todomueblesdebano.com/marcas/oasis-star/
 
 ## 🎯 Objetivo Principal
