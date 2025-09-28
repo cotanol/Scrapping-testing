@@ -13,8 +13,8 @@ from get_urls_by_brand import get_all_product_urls_from_brand
 from producto_combinaciones_final import scrape_all_product_combinations
 
 # --- CONFIGURACIÓN ---
-BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/sagobar/"
-CSV_FILENAME = "reporte_final_marca_completo.csv"
+BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/sergio-luppi/" # Cambiado para probar el nuevo caso
+CSV_FILENAME = "productos_royo_scrapping.csv"
 WAIT_TIMEOUT = 10
 PAUSE_DURATION = 2
 
@@ -29,15 +29,19 @@ def scrape_basic_product_details(soup):
     details['Descuento'] = soup.select_one("span.bg-yellow-300").text.strip().replace('\n', '').replace(' ', '') if soup.select_one("span.bg-yellow-300") else ''
     details['Referencia'] = soup.select_one("div.ref-container").text.strip() if soup.select_one("div.ref-container") else 'No disponible'
     
+    # --- LÓGICA DE EXTRACCIÓN DE VALORACIONES MEJORADA ---
     testimonial_div = soup.select_one("div.testimonial")
     if testimonial_div:
+        # Prioridad 1: Buscar la valoración numérica (ej: "4.3/5")
         rating_value_element = testimonial_div.select_one("span.bold.text-lg")
         if rating_value_element:
             details['Valoración'] = rating_value_element.text.strip()
         else:
+            # Prioridad 2: Si no existe, contar las estrellas
             stars_elements = testimonial_div.select('img[alt="Trustpilot"]')
             details['Valoración'] = f"{len(stars_elements)}/5"
 
+        # Buscar el número de opiniones
         opinions_element = testimonial_div.find("p", class_="mt-2 text-sm")
         details['Número de Opiniones'] = opinions_element.text.strip() if opinions_element else 'No disponible'
     else:
@@ -45,35 +49,6 @@ def scrape_basic_product_details(soup):
         details['Número de Opiniones'] = 'No disponible'
         
     return details
-
-# --- NUEVA FUNCIÓN PARA EXTRAER IMÁGENES ---
-def scrape_image_urls(soup):
-    """
-    Busca el carrusel de imágenes y extrae las URLs de todas las imágenes en alta resolución.
-    """
-    image_urls = []
-    # Selector para encontrar las etiquetas <img> dentro del carrusel de miniaturas
-    image_elements = soup.select("div.swipe-carousel-content img")
-
-    for img in image_elements:
-        if img.has_attr('src'):
-            # La URL en 'src' es de una miniatura. La modificamos para obtener la versión grande.
-            # ej: .../c_fill,f_auto,h_80,q_auto,w_80/...
-            # La cambiamos a: .../f_auto,q_auto/...
-            thumbnail_url = img['src']
-            parts = thumbnail_url.split('/')
-            # Buscamos la parte de la URL con las transformaciones de imagen
-            for i, part in enumerate(parts):
-                if 'c_fill' in part or 'h_80' in part:
-                    # Reemplazamos las transformaciones por unas más genéricas para alta calidad
-                    parts[i] = 'f_auto,q_auto'
-                    break
-            
-            high_res_url = '/'.join(parts)
-            image_urls.append(high_res_url)
-    
-    # Devolvemos una sola cadena de texto con las URLs separadas por coma
-    return ", ".join(image_urls) if image_urls else "No disponible"
 
 def scrape_description_sidebar(driver):
     """Hace clic en 'Descripción', extrae el texto del panel y lo cierra."""
@@ -165,7 +140,6 @@ def main():
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         
         basic_details = scrape_basic_product_details(soup)
-        image_urls = scrape_image_urls(soup) # <-- LLAMAMOS A LA NUEVA FUNCIÓN
         combinations_data = scrape_all_product_combinations(driver, product_url)
         full_description = scrape_description_sidebar(driver)
         time.sleep(1)
@@ -182,7 +156,6 @@ def main():
             'Descuento': basic_details.get('Descuento', ''),
             'Valoración': basic_details.get('Valoración', 'No disponible'),
             'Número de Opiniones': basic_details.get('Número de Opiniones', 'No disponible'),
-            'Image URLs': image_urls, # <-- AÑADIMOS LA NUEVA COLUMNA
             'Combinaciones (JSON)': json.dumps(combinations_data, ensure_ascii=False),
             'Descripción Completa': json.dumps(full_description, ensure_ascii=False),
             'Ficha Técnica': json.dumps(tech_sheet_text, ensure_ascii=False),
