@@ -13,20 +13,41 @@ from get_urls_by_brand import get_all_product_urls_from_brand
 from producto_combinaciones_final import scrape_all_product_combinations
 
 # --- CONFIGURACIÓN ---
-BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/sergio-luppi/"
-CSV_FILENAME = "reporte_final_marca.csv" # <-- Volvemos a CSV
+BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/artbath/" # Cambiado para probar el nuevo caso
+CSV_FILENAME = "reporte_final_marca_completo.csv"
 WAIT_TIMEOUT = 10
 PAUSE_DURATION = 2
 
 def scrape_basic_product_details(soup):
     """Extrae los datos básicos visibles en la página de detalles de un producto."""
     details = {}
+    
     details['Nombre'] = soup.select_one("h1 span.font-semibold").text.strip() if soup.select_one("h1 span.font-semibold") else 'No disponible'
     details['Subtitulo'] = soup.select_one("h1 span.subname").text.strip() if soup.select_one("h1 span.subname") else ''
     details['Precio Actual'] = soup.select_one("span.price").text.strip() if soup.select_one("span.price") else 'No disponible'
     details['Precio Antiguo'] = soup.select_one("span.line-through").text.strip() if soup.select_one("span.line-through") else ''
     details['Descuento'] = soup.select_one("span.bg-yellow-300").text.strip().replace('\n', '').replace(' ', '') if soup.select_one("span.bg-yellow-300") else ''
-    details['Referencia'] = soup.select_one("div.ref-container").text.strip() if soup.select_one("div.ref-container") else ''
+    details['Referencia'] = soup.select_one("div.ref-container").text.strip() if soup.select_one("div.ref-container") else 'No disponible'
+    
+    # --- LÓGICA DE EXTRACCIÓN DE VALORACIONES MEJORADA ---
+    testimonial_div = soup.select_one("div.testimonial")
+    if testimonial_div:
+        # Prioridad 1: Buscar la valoración numérica (ej: "4.3/5")
+        rating_value_element = testimonial_div.select_one("span.bold.text-lg")
+        if rating_value_element:
+            details['Valoración'] = rating_value_element.text.strip()
+        else:
+            # Prioridad 2: Si no existe, contar las estrellas
+            stars_elements = testimonial_div.select('img[alt="Trustpilot"]')
+            details['Valoración'] = f"{len(stars_elements)}/5"
+
+        # Buscar el número de opiniones
+        opinions_element = testimonial_div.find("p", class_="mt-2 text-sm")
+        details['Número de Opiniones'] = opinions_element.text.strip() if opinions_element else 'No disponible'
+    else:
+        details['Valoración'] = 'No disponible'
+        details['Número de Opiniones'] = 'No disponible'
+        
     return details
 
 def scrape_description_sidebar(driver):
@@ -124,7 +145,6 @@ def main():
         time.sleep(1)
         tech_sheet_text, montaje_url, ficha_url = scrape_tech_sheet_sidebar(driver)
         
-        # --- CAMBIO CLAVE: CONVERTIMOS A JSON ANTES DE GUARDAR ---
         final_product_data = {
             'Marca': brand_name,
             'Coleccion': collection_name,
@@ -134,7 +154,9 @@ def main():
             'Precio Actual': basic_details.get('Precio Actual', 'No disponible'),
             'Precio Antiguo': basic_details.get('Precio Antiguo', ''),
             'Descuento': basic_details.get('Descuento', ''),
-            'Combinaciones': json.dumps(combinations_data, ensure_ascii=False),
+            'Valoración': basic_details.get('Valoración', 'No disponible'),
+            'Número de Opiniones': basic_details.get('Número de Opiniones', 'No disponible'),
+            'Combinaciones (JSON)': json.dumps(combinations_data, ensure_ascii=False),
             'Descripción Completa': json.dumps(full_description, ensure_ascii=False),
             'Ficha Técnica': json.dumps(tech_sheet_text, ensure_ascii=False),
             'URL Instrucciones Montaje': montaje_url,
@@ -143,7 +165,6 @@ def main():
         }
         all_products_final_data.append(final_product_data)
 
-    # --- CAMBIO CLAVE: GUARDAMOS EN CSV ---
     if all_products_final_data:
         print(f"\n--- PROCESO COMPLETADO: Se procesaron {len(all_products_final_data)} productos. Guardando en CSV... ---")
         headers = list(all_products_final_data[0].keys())
