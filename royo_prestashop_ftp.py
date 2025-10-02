@@ -12,6 +12,19 @@ from selenium.webdriver.support import expected_conditions as EC
 # Importamos el módulo para obtener URLs
 from get_urls_by_brand import get_all_product_urls_from_brand
 
+# ================================
+# 1. FUNCIÓN PARA LIMPIAR TEXTO HTML
+# ================================
+def clean_html_text(text):
+    """Limpia texto HTML removiendo saltos de línea y caracteres problemáticos para CSV"""
+    if not text:
+        return ""
+    # Remover saltos de línea y caracteres problemáticos
+    cleaned = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    # Remover espacios múltiples
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned.strip()
+
 # --- CONFIGURACIÓN ---
 BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/royo/"
 TAX_RATE = 1.21
