@@ -1,19 +1,24 @@
 import json
 import csv
 import re
+import time
+from ftplib import FTP
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- CONFIGURACIÓN ---
-URL = "https://www.todomueblesdebano.com/conjunto-mueble-de-bano-campoaras-natalia-con-patas-3-cajones.html"
-TAX_RATE = 1.21
-PRODUCT_OUTPUT_FILENAME = 'product_final.csv'
-COMBINATION_OUTPUT_FILENAME = 'combinations_final.csv'
+# Importamos el módulo para obtener URLs
+from get_urls_by_brand import get_all_product_urls_from_brand
 
-# --- DEFINICIÓN DE CABECERAS CSV COMPLETAS ---
+# --- CONFIGURACIÓN ---
+BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/royo/"
+TAX_RATE = 1.21
+PRODUCT_OUTPUT_FILENAME = 'products_import.csv'
+COMBINATION_OUTPUT_FILENAME = 'combinations_import.csv'
+
+# --- CABECERAS CSV PRESTASHOP ---
 PRODUCT_CSV_HEADERS = [
     'Product ID','Active (0/1)','Name *','Categories (x,y,z...)','Price tax excluded','Tax rules ID','Wholesale price',
     'On sale (0/1)','Discount amount','Discount percent','Discount from (yyyy-mm-dd)','Discount to (yyyy-mm-dd)',
@@ -37,16 +42,60 @@ COMBINATION_CSV_HEADERS = [
     'Image alt texts (x,y,z...)','ID / Name of shop','Advanced Stock Managment','Depends on stock','Warehouse'
 ]
 
-# ==============================================================================
-# FUNCIÓN PARA EXTRAER DATOS DEL PRODUCTO PRINCIPAL (66 COLUMNAS)
-# ==============================================================================
+# ================================
+# 1. FUNCIÓN FTP
+# ================================
+def leer_configuracion_ftp(archivo_config):
+    config = {}
+    try:
+        with open(archivo_config, "r", encoding="utf-8") as f:
+            for linea in f:
+                if "=" in linea:
+                    clave, valor = linea.strip().split("=", 1)
+                    config[clave.strip()] = valor.strip()
+        return config
+    except Exception as e:
+        print(f"❌ Error al leer configuración FTP: {e}")
+        return None
+
+def subir_archivo_ftp(nombre_archivo, servidor, usuario, contraseña, ruta_remota="/"):
+    try:
+        ftp = FTP(servidor)
+        ftp.login(usuario, contraseña)
+        print(f"🔗 Conectado al FTP: {servidor}")
+        
+        directorio_actual = ftp.pwd()
+        print(f"📁 Directorio actual: {directorio_actual}")
+        
+        if ruta_remota and ruta_remota != "/" and ruta_remota.strip():
+            try:
+                ftp.cwd(ruta_remota)
+                print(f"📁 Cambiado a: {ruta_remota}")
+            except Exception as e:
+                print(f"⚠️  No se pudo cambiar a '{ruta_remota}': {e}")
+                print(f"📁 Usando directorio actual: {directorio_actual}")
+        
+        with open(nombre_archivo, 'rb') as archivo:
+            ftp.storbinary(f'STOR {nombre_archivo}', archivo)
+        
+        print(f"✅ Archivo '{nombre_archivo}' subido correctamente al FTP.")
+        ftp.quit()
+        return True
+    except Exception as e:
+        print(f"❌ Error al subir '{nombre_archivo}' al FTP: {e}")
+        return False
+
+# ================================
+# 2. EXTRACCIÓN DATOS PRESTASHOP
+# ================================
 def extract_product_data(nuxt_data):
     try:
         product_data = nuxt_data['state']['product']['product']
         prices = product_data.get('prices', {})
         seo_data = product_data.get('seo', {})
         technical_data = nuxt_data['state']['product'].get('technical_data', [])
-    except (KeyError, TypeError): return None
+    except (KeyError, TypeError): 
+        return None
 
     tech_data_map = {item['attribute']['name'].lower(): item['options'][0]['option']['value_string'] 
                      for item in technical_data if item.get('attribute') and item.get('options')}
@@ -76,7 +125,7 @@ def extract_product_data(nuxt_data):
     files_list = product_data.get('files', [])
     file_url = next((f['url'] for f in files_list if f.get('file_type') == 'data_sheet'), '')
 
-    final_data = {
+    return {
         'Product ID': product_data.get('id', ''), 'Active (0/1)': 1, 'Name *': product_data.get('name', ''),
         'Categories (x,y,z...)': categories_str, 'Price tax excluded': price_tax_excluded, 'Tax rules ID': 1,
         'Wholesale price': '', 'On sale (0/1)': on_sale, 'Discount amount': discount_amount if on_sale else '',
@@ -98,15 +147,11 @@ def extract_product_data(nuxt_data):
         'Delete existing images (0 = No, 1 = Yes)': 1, 'Feature(Name:Value:Position)': ";".join(features_list),
         'Available online only (0 = No, 1 = Yes)': 0, 'Condition': 'new', 'Customizable (0 = No, 1 = Yes)': 0,
         'Uploadable files (0 = No, 1 = Yes)': 0, 'Text fields (0 = No, 1 = Yes)': 0, 'Out of stock action': 0,
-        'Virtual product': 1 if file_url else 0, 'File URL': file_url, 'Number of allowed downloads': '',
-        'Expiration date': '', 'Number of days': '', 'ID / Name of shop': 1, 'Advanced stock management': 0,
-        'Depends On Stock': 0, 'Warehouse': 0, 'Acessories  (x,y,z...)': ''
+        'Virtual product': 1, 'File URL': file_url, 'Number of allowed downloads': '', 'Expiration date': '',
+        'Number of days': '', 'ID / Name of shop': 1, 'Advanced stock management': 0, 'Depends On Stock': 0,
+        'Warehouse': 0, 'Acessories  (x,y,z...)': ''
     }
-    return final_data
 
-# ==============================================================================
-# FUNCIÓN PARA EXTRAER DATOS DE LAS COMBINACIONES (VERSIÓN SIMPLE Y ROBUSTA)
-# ==============================================================================
 def extract_combinations_data(nuxt_data):
     try:
         product_data = nuxt_data['state']['product']['product']
@@ -118,6 +163,7 @@ def extract_combinations_data(nuxt_data):
         all_combinations = []
     except (KeyError, TypeError): return []
 
+    # Crear mapping de atributos
     attribute_mapping = {}
     if variants and 'options' in variants[0] and 'options' in variants[0]['options']:
         for index, option in enumerate(variants[0]['options']['options']):
@@ -153,47 +199,97 @@ def extract_combinations_data(nuxt_data):
         })
     return all_combinations
 
-# ==============================================================================
-# BLOQUE PRINCIPAL DE EJECUCIÓN
-# ==============================================================================
-if __name__ == "__main__":
+# ================================
+# 3. FUNCIÓN PRINCIPAL INTEGRADA
+# ================================
+def main():
+    print("🚀 INICIANDO: Scraper Royo + PrestaShop + FTP")
+    print("=" * 50)
+    
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--log-level=3")
-
+    
     driver = None
+    all_products_data = []
+    all_combinations_data = []
+    
     try:
-        print("Iniciando scraper final...")
-        # Usar el chromedriver local
+        # PASO 1: Obtener todas las URLs de productos
+        print("🔍 PASO 1: Obteniendo URLs de productos...")
         service = Service(executable_path='chromedriver.exe')
         driver = webdriver.Chrome(service=service, options=options)
-        driver.get(URL)
         
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__nuxt")))
-        nuxt_data = driver.execute_script("return window.__NUXT__;")
+        product_urls_with_context = get_all_product_urls_from_brand(driver, BRAND_URL_TO_SCRAPE)
+        print(f"✅ Se encontraron {len(product_urls_with_context)} productos")
         
-        # --- PROCESAR Y ESCRIBIR CSV DE PRODUCTO ---
-        product_for_csv = extract_product_data(nuxt_data)
-        if product_for_csv:
+        # PASO 2: Procesar cada producto
+        print(f"\n🕷️ PASO 2: Procesando productos (formato PrestaShop)...")
+        for i, product_info in enumerate(product_urls_with_context, 1):
+            product_url = product_info['url']
+            print(f"  [{i}/{len(product_urls_with_context)}] Procesando: {product_url}")
+            
+            driver.get(product_url)
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__nuxt")))
+            nuxt_data = driver.execute_script("return window.__NUXT__;")
+            
+            # Extraer datos del producto
+            product_data = extract_product_data(nuxt_data)
+            if product_data:
+                all_products_data.append(product_data)
+            
+            # Extraer combinaciones
+            combinations_data = extract_combinations_data(nuxt_data)
+            all_combinations_data.extend(combinations_data)
+            
+            time.sleep(1)  # Pausa entre productos
+        
+        # PASO 3: Generar CSVs
+        print(f"\n📄 PASO 3: Generando archivos CSV...")
+        
+        if all_products_data:
             with open(PRODUCT_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';')
                 writer.writeheader()
-                writer.writerow(product_for_csv)
-            print(f"[ÉXITO] Archivo '{PRODUCT_OUTPUT_FILENAME}' generado con las 66 columnas.")
+                writer.writerows(all_products_data)
+            print(f"✅ {PRODUCT_OUTPUT_FILENAME} generado ({len(all_products_data)} productos)")
         
-        # --- PROCESAR Y ESCRIBIR CSV DE COMBINACIONES ---
-        combinations_for_csv = extract_combinations_data(nuxt_data)
-        if combinations_for_csv:
+        if all_combinations_data:
             with open(COMBINATION_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=COMBINATION_CSV_HEADERS, delimiter=';')
                 writer.writeheader()
-                writer.writerows(combinations_for_csv)
-            print(f"[ÉXITO] Archivo '{COMBINATION_OUTPUT_FILENAME}' generado correctamente.")
-
+                writer.writerows(all_combinations_data)
+            print(f"✅ {COMBINATION_OUTPUT_FILENAME} generado ({len(all_combinations_data)} combinaciones)")
+        
+        # PASO 4: Subir a FTP
+        print(f"\n📤 PASO 4: Subiendo archivos definitivos al FTP...")
+        config = leer_configuracion_ftp("ftp_config.txt")
+        
+        if config:
+            if all_products_data:
+                subir_archivo_ftp(PRODUCT_OUTPUT_FILENAME, config.get("servidor"), 
+                                config.get("usuario"), config.get("contraseña"), 
+                                config.get("ruta_remota", "/"))
+            
+            if all_combinations_data:
+                subir_archivo_ftp(COMBINATION_OUTPUT_FILENAME, config.get("servidor"), 
+                                config.get("usuario"), config.get("contraseña"), 
+                                config.get("ruta_remota", "/"))
+            
+            print(f"\n🎉 PROCESO COMPLETADO: {len(all_products_data)} productos procesados y subidos al FTP!")
+        else:
+            print(f"\n⚠️ Archivos generados pero sin configuración FTP.")
+            print(f"📄 Archivos disponibles localmente:")
+            print(f"   • {PRODUCT_OUTPUT_FILENAME}")
+            print(f"   • {COMBINATION_OUTPUT_FILENAME}")
+    
     except Exception as e:
-        print(f"Ocurrió un error en el proceso principal: {e}")
+        print(f"❌ Error en el proceso: {e}")
     finally:
         if driver:
             driver.quit()
-            print("\nScript finalizado.")
+            print("\n👋 Scraper finalizado.")
+
+if __name__ == "__main__":
+    main()
