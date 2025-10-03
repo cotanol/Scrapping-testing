@@ -22,11 +22,37 @@ def clean_html_text(text):
         return ""
     # Convertir a string si no lo es
     text = str(text)
-    # Remover saltos de línea y caracteres problemáticos
+    # Remover caracteres HTML y problemáticos
     cleaned = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    # Remover comillas dobles y punto y coma que rompen CSV
+    cleaned = cleaned.replace('"', '').replace(';', ',')
+    # Remover otros caracteres problemáticos
+    cleaned = cleaned.replace('|', '-').replace('\x00', '').replace('\x0b', '').replace('\x0c', '')
     # Remover espacios múltiples
     cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned.strip()
+
+def clean_dimension_value(value):
+    """Limpia valores de dimensiones para que sean compatibles con PrestaShop"""
+    if not value or value is None:
+        return ""
+    
+    # Convertir a string y limpiar
+    value = str(value).strip()
+    
+    # Remover "cm" y otros textos
+    value = value.replace(' cm', '').replace('cm', '').replace(' ', '')
+    
+    # Si queda vacío, devolver vacío
+    if not value:
+        return ""
+    
+    # Intentar convertir a float para validar que sea numérico
+    try:
+        float_val = float(value.replace(',', '.'))  # Cambiar comas por puntos
+        return str(float_val)
+    except (ValueError, TypeError):
+        return ""  # Si no se puede convertir, devolver vacío
 
 # --- CONFIGURACIÓN ---
 BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/royo/"
@@ -41,7 +67,7 @@ COMBINATION_OUTPUT_FILENAME = f'{timestamp}-royo-combinations_import.csv'
 PRODUCT_CSV_HEADERS = [
     'Product ID','Active (0/1)','Name *','Categories (x,y,z...)','Price tax excluded','Tax rules ID','Wholesale price',
     'On sale (0/1)','Discount amount','Discount percent','Discount from (yyyy-mm-dd)','Discount to (yyyy-mm-dd)',
-    'Reference #','Supplier reference #','Supplier','Manufacturer','EAN13','UPC','Ecotax','Width','Height','Depth',
+    'Reference #','Supplier reference #','Supplier','Manufacturer','EAN13','UPC','MPN','Ecotax','Width','Height','Depth',
     'Weight','Delivery time of in-stock products','Delivery time of out-of-stock products with allowed orders',
     'Quantity','Minimal quantity','Low stock level','Send me an email when the quantity is under this level',
     'Visibility','Additional shipping cost','Unity','Unit price','Summary','Description','Tags (x,y,z...)',
@@ -107,7 +133,7 @@ def subir_archivo_ftp(nombre_archivo, servidor, usuario, contraseña, ruta_remot
 # ================================
 # 2. EXTRACCIÓN DATOS PRESTASHOP
 # ================================
-def extract_product_data(nuxt_data):
+def extract_product_data(nuxt_data, numeric_product_id):
     try:
         product_data = nuxt_data['state']['product']['product']
         prices = product_data.get('prices', {})
@@ -125,17 +151,19 @@ def extract_product_data(nuxt_data):
     on_sale = 1 if prices.get('pvp_supplier', 0) > prices.get('pvp_web', 0) else 0
     discount_amount = round((prices.get('pvp_supplier', 0) - prices.get('pvp_web', 0)) / 100, 2) if on_sale else 0
 
-    categories_list = product_data.get('categories', [])
-    categories_str = ",".join([cat['name'] for cat in categories_list if 'name' in cat])
+    # Usar categoría ID 13 de PrestaShop
+    categories_str = "13"
     
     images_list = product_data.get('images', [])
-    image_urls = ",".join([f"https://cdn.todomueblesdebano.com/image/upload/f_auto,q_auto/v1/{img['public_id']}" for img in images_list])
+    # Codificar las comas dentro de las URLs para evitar confusión con separadores
+    image_urls = ",".join([f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{img['public_id']}" for img in images_list])
     
-    features_list = [f"{item['attribute']['name']}:{item['options'][0]['option']['value_string']}:{item.get('position', 0)}"
+    features_list = [f"{clean_html_text(item['attribute']['name'])}:{clean_html_text(item['options'][0]['option']['value_string'])}:{item.get('position', 0)}"
                      for item in technical_data if item.get('attribute') and item.get('options')]
 
     tags = list(set([word.lower() for word in re.split(r'\s|,', product_data.get('name', '')) if len(word) > 3]))
-    tags.extend([cat['name'].lower() for cat in categories_list if 'name' in cat])
+    tags.append("muebles")
+    tags.append("baño")
     tags.append(product_data.get('supplier', {}).get('name', '').lower())
 
     delivery_time_obj = product_data.get('delivery_time', {})
@@ -155,15 +183,16 @@ def extract_product_data(nuxt_data):
         summary_text = summary_text[:800] + '...'
 
     return {
-        'Product ID': product_data.get('id', ''), 'Active (0/1)': 1, 'Name *': clean_html_text(product_data.get('name', '')),
+        'Product ID': numeric_product_id, 'Active (0/1)': 1, 'Name *': clean_html_text(product_data.get('name', '')),
         'Categories (x,y,z...)': categories_str, 'Price tax excluded': price_tax_excluded, 'Tax rules ID': 1,
         'Wholesale price': '', 'On sale (0/1)': on_sale, 'Discount amount': discount_amount if on_sale else '',
         'Discount percent': prices.get('web_discount', '') if on_sale else '', 'Discount from (yyyy-mm-dd)': '',
         'Discount to (yyyy-mm-dd)': '', 'Reference #': product_data.get('ref', ''), 'Supplier reference #': '',
         'Supplier': clean_html_text(product_data.get('supplier', {}).get('name', '')), 'Manufacturer': clean_html_text(product_data.get('supplier', {}).get('name', '')),
-        'EAN13': product_data.get('ean', ''), 'UPC': '', 'Ecotax': '', 'Width': '',
-        'Height': tech_data_map.get('alto seleccionable estándar', '').replace(' cm', ''),
-        'Depth': tech_data_map.get('fondo seleccionable estándar', '').replace(' cm', ''), 'Weight': 0,
+        'EAN13': product_data.get('ean', ''), 'UPC': '', 'MPN': '', 'Ecotax': '', 
+        'Width': clean_dimension_value(tech_data_map.get('ancho seleccionable estándar', '')),
+        'Height': clean_dimension_value(tech_data_map.get('alto seleccionable estándar', '')),
+        'Depth': clean_dimension_value(tech_data_map.get('fondo seleccionable estándar', '')), 'Weight': 0,
         'Delivery time of in-stock products': clean_html_text(delivery_time),
         'Delivery time of out-of-stock products with allowed orders': '', 'Quantity': 0, 'Minimal quantity': 1,
         'Low stock level': '', 'Send me an email when the quantity is under this level': 0, 'Visibility': 'both',
@@ -181,13 +210,12 @@ def extract_product_data(nuxt_data):
         'Warehouse': 0, 'Acessories  (x,y,z...)': ''
     }
 
-def extract_combinations_data(nuxt_data):
+def extract_combinations_data(nuxt_data, numeric_product_id):
     try:
         product_data = nuxt_data['state']['product']['product']
         variants = product_data.get('variants', [])
         if not variants: return []
         
-        product_id = product_data.get('id')
         base_price_cents = product_data.get('prices', {}).get('pvp_web', 0)
         all_combinations = []
     except (KeyError, TypeError): return []
@@ -219,7 +247,7 @@ def extract_combinations_data(nuxt_data):
             default_assigned = True
             
         all_combinations.append({
-            'Product ID*': product_id, 'Attribute (Name:Type:Position)*': attributes_header,
+            'Product ID*': numeric_product_id, 'Attribute (Name:Type:Position)*': attributes_header,
             'Value (Value:Position)*': values_str, 'Reference': variant.get('ref', ''), 'EAN13': variant.get('ean', ''),
             'Impact on price': price_impact, 'Default (0 = No, 1 = Yes)': is_default, 'Image URLs (x,y,z...)': '',
             'Supplier reference': '', 'UPC': '', 'Wholesale price': '', 'Ecotax': 0, 'Quantity': 100,
@@ -259,23 +287,24 @@ def main():
         print(f"\n🕷️ PASO 2: Procesando productos (formato PrestaShop)...")
         for i, product_info in enumerate(product_urls_with_context, 1):
             product_url = product_info['url']
-            print(f"  [{i}/{len(product_urls_with_context)}] Procesando: {product_url}")
+            numeric_product_id = 99 + i  # Empezar desde 100 (99+1=100)
+            print(f"  [{i}/{len(product_urls_with_context)}] Procesando: {product_url} (ID: {numeric_product_id})")
             
             try:
                 driver.get(product_url)
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__nuxt")))
                 nuxt_data = driver.execute_script("return window.__NUXT__;")
                 
-                # Extraer datos del producto
-                product_data = extract_product_data(nuxt_data)
+                # Extraer datos del producto con ID numérico
+                product_data = extract_product_data(nuxt_data, numeric_product_id)
                 if product_data:
                     all_products_data.append(product_data)
-                    print(f"    ✅ Producto {i} procesado exitosamente")
+                    print(f"    ✅ Producto {i} procesado exitosamente (ID: {numeric_product_id})")
                 else:
                     print(f"    ⚠️  No se pudieron extraer datos del producto {i}")
                 
-                # Extraer combinaciones
-                combinations_data = extract_combinations_data(nuxt_data)
+                # Extraer combinaciones con ID numérico
+                combinations_data = extract_combinations_data(nuxt_data, numeric_product_id)
                 if combinations_data:
                     all_combinations_data.extend(combinations_data)
                     print(f"    ✅ {len(combinations_data)} combinaciones extraídas")
@@ -292,14 +321,14 @@ def main():
         
         if all_products_data:
             with open(PRODUCT_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';')
+                writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_ALL)
                 writer.writeheader()
                 writer.writerows(all_products_data)
             print(f"✅ {PRODUCT_OUTPUT_FILENAME} generado ({len(all_products_data)} productos)")
         
         if all_combinations_data:
             with open(COMBINATION_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=COMBINATION_CSV_HEADERS, delimiter=';')
+                writer = csv.DictWriter(f, fieldnames=COMBINATION_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_ALL)
                 writer.writeheader()
                 writer.writerows(all_combinations_data)
             print(f"✅ {COMBINATION_OUTPUT_FILENAME} generado ({len(all_combinations_data)} combinaciones)")
