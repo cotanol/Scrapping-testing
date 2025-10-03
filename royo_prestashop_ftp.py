@@ -2,6 +2,7 @@ import json
 import csv
 import re
 import time
+from datetime import datetime
 from ftplib import FTP
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -28,8 +29,11 @@ def clean_html_text(text):
 # --- CONFIGURACIÓN ---
 BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/royo/"
 TAX_RATE = 1.21
-PRODUCT_OUTPUT_FILENAME = 'products_import.csv'
-COMBINATION_OUTPUT_FILENAME = 'combinations_import.csv'
+
+# Generar nombres de archivo con fecha y hora
+timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+PRODUCT_OUTPUT_FILENAME = f'{timestamp}-royo-products_import.csv'
+COMBINATION_OUTPUT_FILENAME = f'{timestamp}-royo-combinations_import.csv'
 
 # --- CABECERAS CSV PRESTASHOP ---
 PRODUCT_CSV_HEADERS = [
@@ -138,6 +142,16 @@ def extract_product_data(nuxt_data):
     files_list = product_data.get('files', [])
     file_url = next((f['url'] for f in files_list if f.get('file_type') == 'data_sheet'), '')
 
+    # Limitar URL rewritten a 128 caracteres máximo
+    url_slug = product_data.get('slug', '')
+    if len(url_slug) > 128:
+        url_slug = url_slug[:128]
+
+    # Limitar Summary (description_short) a 800 caracteres máximo
+    summary_text = seo_data.get('short_description', '')
+    if len(summary_text) > 800:
+        summary_text = summary_text[:800] + '...'
+
     return {
         'Product ID': product_data.get('id', ''), 'Active (0/1)': 1, 'Name *': product_data.get('name', ''),
         'Categories (x,y,z...)': categories_str, 'Price tax excluded': price_tax_excluded, 'Tax rules ID': 1,
@@ -147,20 +161,20 @@ def extract_product_data(nuxt_data):
         'Supplier': product_data.get('supplier', {}).get('name', ''), 'Manufacturer': product_data.get('supplier', {}).get('name', ''),
         'EAN13': product_data.get('ean', ''), 'UPC': '', 'Ecotax': '', 'Width': '',
         'Height': tech_data_map.get('alto seleccionable estándar', '').replace(' cm', ''),
-        'Depth': tech_data_map.get('fondo seleccionable estándar', '').replace(' cm', ''), 'Weight': '',
+        'Depth': tech_data_map.get('fondo seleccionable estándar', '').replace(' cm', ''), 'Weight': 0,
         'Delivery time of in-stock products': delivery_time,
         'Delivery time of out-of-stock products with allowed orders': '', 'Quantity': 0, 'Minimal quantity': 1,
         'Low stock level': '', 'Send me an email when the quantity is under this level': 0, 'Visibility': 'both',
-        'Additional shipping cost': '', 'Unity': '', 'Unit price': '', 'Summary': seo_data.get('short_description', ''),
+        'Additional shipping cost': '', 'Unity': '', 'Unit price': '', 'Summary': summary_text,
         'Description': seo_data.get('description', ''), 'Tags (x,y,z...)': ",".join(list(set(tags))),
         'Meta title': seo_data.get('meta_title', ''), 'Meta keywords': '', 'Meta description': seo_data.get('meta_description', ''),
-        'URL rewritten': product_data.get('slug', ''), 'Text when in stock': 'Disponible', 'Text when backorder allowed': '',
+        'URL rewritten': url_slug, 'Text when in stock': 'Disponible', 'Text when backorder allowed': '',
         'Available for order (0 = No, 1 = Yes)': 1, 'Product available date': '', 'Product creation date': '',
         'Show price (0 = No, 1 = Yes)': 1, 'Image URLs (x,y,z...)': image_urls, 'Image alt texts (x,y,z...)': '',
         'Delete existing images (0 = No, 1 = Yes)': 1, 'Feature(Name:Value:Position)': ";".join(features_list),
         'Available online only (0 = No, 1 = Yes)': 0, 'Condition': 'new', 'Customizable (0 = No, 1 = Yes)': 0,
         'Uploadable files (0 = No, 1 = Yes)': 0, 'Text fields (0 = No, 1 = Yes)': 0, 'Out of stock action': 0,
-        'Virtual product': 1, 'File URL': file_url, 'Number of allowed downloads': '', 'Expiration date': '',
+        'Virtual product': 0 if not file_url else 1, 'File URL': file_url, 'Number of allowed downloads': '', 'Expiration date': '',
         'Number of days': '', 'ID / Name of shop': 1, 'Advanced stock management': 0, 'Depends On Stock': 0,
         'Warehouse': 0, 'Acessories  (x,y,z...)': ''
     }
@@ -184,6 +198,7 @@ def extract_combinations_data(nuxt_data):
     attributes_header = ",".join([f"{v['name']}:{v['type']}:{v['position']}" for v in attribute_mapping.values()])
 
     default_assigned = False
+    image_position = 1  # Contador para posición de imagen
     for variant in variants:
         values_list = []
         for option in variant.get('options', {}).get('options', []):
@@ -207,9 +222,10 @@ def extract_combinations_data(nuxt_data):
             'Impact on price': price_impact, 'Default (0 = No, 1 = Yes)': is_default, 'Image URLs (x,y,z...)': '',
             'Supplier reference': '', 'UPC': '', 'Wholesale price': '', 'Ecotax': 0, 'Quantity': 100,
             'Minimal quantity': 1, 'Low stock level': '', 'Impact on weight': 0, 'Combination available date': '',
-            'Image position': '', 'Image alt texts (x,y,z...)': '', 'ID / Name of shop': 1,
+            'Image position': image_position, 'Image alt texts (x,y,z...)': '', 'ID / Name of shop': 1,
             'Advanced Stock Managment': 0, 'Depends on stock': 0, 'Warehouse': 0
         })
+        image_position += 1  # Incrementar posición para siguiente combinación
     return all_combinations
 
 # ================================

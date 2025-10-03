@@ -53,13 +53,13 @@ Este proyecto automatiza completamente la extracción de 48 productos de la marc
 python royo_prestashop_ftp.py
 ```
 
-### 🎯 **Flujo Automático Completo:**
+### 🎯 \*_Flujo Automático Completo:_
 
 1. 🔍 **Extrae 48 URLs** de productos Royo
 2. 🕷️ **Procesa cada producto** con formato PrestaShop avanzado
 3. � **Genera 2 CSVs**:
-   - `products_import.csv` (66 columnas PrestaShop)
-   - `combinations_import.csv` (22 columnas combinaciones)
+   - `%Y%m%d%H%M%S-royo-products_import.csv` (66 columnas PrestaShop)
+   - `%Y%m%d%H%M%S-royo-combinations_import.csv` (22 columnas combinaciones)
 4. 📤 **Sube automáticamente** ambos archivos al FTP
 5. ✅ **Proceso completo en ~5-6 minutos**
 
@@ -82,6 +82,7 @@ python royo_prestashop_ftp.py
 ### 🎯 **Cambiar marca objetivo**:
 
 Edita en `royo_prestashop_ftp.py`:
+Esta por defecto con la marca Royo
 
 ```python
 BRAND_URL_TO_SCRAPE = "https://www.todomueblesdebano.com/marcas/OTRA-MARCA/"
