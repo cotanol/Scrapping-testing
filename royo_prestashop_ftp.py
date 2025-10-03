@@ -18,8 +18,10 @@ from get_urls_by_brand import get_all_product_urls_from_brand
 # ================================
 def clean_html_text(text):
     """Limpia texto HTML removiendo saltos de línea y caracteres problemáticos para CSV"""
-    if not text:
+    if not text or text is None:
         return ""
+    # Convertir a string si no lo es
+    text = str(text)
     # Remover saltos de línea y caracteres problemáticos
     cleaned = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
     # Remover espacios múltiples
@@ -143,31 +145,31 @@ def extract_product_data(nuxt_data):
     file_url = next((f['url'] for f in files_list if f.get('file_type') == 'data_sheet'), '')
 
     # Limitar URL rewritten a 128 caracteres máximo
-    url_slug = product_data.get('slug', '')
-    if len(url_slug) > 128:
+    url_slug = product_data.get('slug', '') or ''
+    if url_slug and len(url_slug) > 128:
         url_slug = url_slug[:128]
 
     # Limitar Summary (description_short) a 800 caracteres máximo
-    summary_text = seo_data.get('short_description', '')
-    if len(summary_text) > 800:
+    summary_text = seo_data.get('short_description', '') or ''
+    if summary_text and len(summary_text) > 800:
         summary_text = summary_text[:800] + '...'
 
     return {
-        'Product ID': product_data.get('id', ''), 'Active (0/1)': 1, 'Name *': product_data.get('name', ''),
+        'Product ID': product_data.get('id', ''), 'Active (0/1)': 1, 'Name *': clean_html_text(product_data.get('name', '')),
         'Categories (x,y,z...)': categories_str, 'Price tax excluded': price_tax_excluded, 'Tax rules ID': 1,
         'Wholesale price': '', 'On sale (0/1)': on_sale, 'Discount amount': discount_amount if on_sale else '',
         'Discount percent': prices.get('web_discount', '') if on_sale else '', 'Discount from (yyyy-mm-dd)': '',
         'Discount to (yyyy-mm-dd)': '', 'Reference #': product_data.get('ref', ''), 'Supplier reference #': '',
-        'Supplier': product_data.get('supplier', {}).get('name', ''), 'Manufacturer': product_data.get('supplier', {}).get('name', ''),
+        'Supplier': clean_html_text(product_data.get('supplier', {}).get('name', '')), 'Manufacturer': clean_html_text(product_data.get('supplier', {}).get('name', '')),
         'EAN13': product_data.get('ean', ''), 'UPC': '', 'Ecotax': '', 'Width': '',
         'Height': tech_data_map.get('alto seleccionable estándar', '').replace(' cm', ''),
         'Depth': tech_data_map.get('fondo seleccionable estándar', '').replace(' cm', ''), 'Weight': 0,
-        'Delivery time of in-stock products': delivery_time,
+        'Delivery time of in-stock products': clean_html_text(delivery_time),
         'Delivery time of out-of-stock products with allowed orders': '', 'Quantity': 0, 'Minimal quantity': 1,
         'Low stock level': '', 'Send me an email when the quantity is under this level': 0, 'Visibility': 'both',
-        'Additional shipping cost': '', 'Unity': '', 'Unit price': '', 'Summary': summary_text,
-        'Description': seo_data.get('description', ''), 'Tags (x,y,z...)': ",".join(list(set(tags))),
-        'Meta title': seo_data.get('meta_title', ''), 'Meta keywords': '', 'Meta description': seo_data.get('meta_description', ''),
+        'Additional shipping cost': '', 'Unity': '', 'Unit price': '', 'Summary': clean_html_text(summary_text),
+        'Description': clean_html_text(seo_data.get('description', '')), 'Tags (x,y,z...)': ",".join(list(set(tags))),
+        'Meta title': clean_html_text(seo_data.get('meta_title', '')), 'Meta keywords': '', 'Meta description': clean_html_text(seo_data.get('meta_description', '')),
         'URL rewritten': url_slug, 'Text when in stock': 'Disponible', 'Text when backorder allowed': '',
         'Available for order (0 = No, 1 = Yes)': 1, 'Product available date': '', 'Product creation date': '',
         'Show price (0 = No, 1 = Yes)': 1, 'Image URLs (x,y,z...)': image_urls, 'Image alt texts (x,y,z...)': '',
@@ -259,18 +261,29 @@ def main():
             product_url = product_info['url']
             print(f"  [{i}/{len(product_urls_with_context)}] Procesando: {product_url}")
             
-            driver.get(product_url)
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__nuxt")))
-            nuxt_data = driver.execute_script("return window.__NUXT__;")
-            
-            # Extraer datos del producto
-            product_data = extract_product_data(nuxt_data)
-            if product_data:
-                all_products_data.append(product_data)
-            
-            # Extraer combinaciones
-            combinations_data = extract_combinations_data(nuxt_data)
-            all_combinations_data.extend(combinations_data)
+            try:
+                driver.get(product_url)
+                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__nuxt")))
+                nuxt_data = driver.execute_script("return window.__NUXT__;")
+                
+                # Extraer datos del producto
+                product_data = extract_product_data(nuxt_data)
+                if product_data:
+                    all_products_data.append(product_data)
+                    print(f"    ✅ Producto {i} procesado exitosamente")
+                else:
+                    print(f"    ⚠️  No se pudieron extraer datos del producto {i}")
+                
+                # Extraer combinaciones
+                combinations_data = extract_combinations_data(nuxt_data)
+                if combinations_data:
+                    all_combinations_data.extend(combinations_data)
+                    print(f"    ✅ {len(combinations_data)} combinaciones extraídas")
+                
+            except Exception as e:
+                print(f"    ❌ Error procesando producto {i}: {e}")
+                print(f"    🔄 Continuando con el siguiente producto...")
+                continue
             
             time.sleep(1)  # Pausa entre productos
         
