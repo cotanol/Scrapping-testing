@@ -81,10 +81,12 @@ PRODUCT_CSV_HEADERS = [
 ]
 
 COMBINATION_CSV_HEADERS = [
-    'Product ID*','Attribute (Name:Type:Position)*','Value (Value:Position)*','Supplier reference','Reference','EAN13',
-    'UPC','Wholesale price','Impact on price','Ecotax','Quantity','Minimal quantity','Low stock level','Impact on weight',
-    'Default (0 = No, 1 = Yes)','Combination available date','Image position','Image URLs (x,y,z...)',
-    'Image alt texts (x,y,z...)','ID / Name of shop','Advanced Stock Managment','Depends on stock','Warehouse'
+    'Id del Producto','Referencia del Producto','Atributo (Nombre:Tipo:Posicion)*','Valor (Valor:Posicion)*',
+    'Ref proveedor','Referencia','EAN13','UPC','MPN','Precio de coste','Impacto en el precio','Ecotasa',
+    'Cantidad','Cantidad minima','Nivel de stock bajo','Enviame un mensaje de correo electronico',
+    'Impacto en el peso','Predeterminado (0=No, 1=Si)','Fecha de disponibilidad de la combinacion',
+    'Elegir entre imagenes de productos por posicion(1,2,3)','URLs de las imagenes(x,y,z...)','Textos alternativos de imagen(x,y,z...)',
+    'Id / Nombre de la tienda'
 ]
 
 # ================================
@@ -218,6 +220,14 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
         
         base_price_cents = product_data.get('prices', {}).get('pvp_web', 0)
         all_combinations = []
+        
+        # Obtener la URL de la imagen principal del producto
+        images_list = product_data.get('images', [])
+        main_image_url = ""
+        if images_list:
+            # Usar la primera imagen con URL codificada
+            main_image_url = f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{images_list[0]['public_id']}"
+        
     except (KeyError, TypeError): return []
 
     # Crear mapping de atributos
@@ -228,8 +238,7 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
     attributes_header = ",".join([f"{v['name']}:{v['type']}:{v['position']}" for v in attribute_mapping.values()])
 
     default_assigned = False
-    image_position = 1  # Contador para posición de imagen
-    for variant in variants:
+    for index, variant in enumerate(variants):
         values_list = []
         for option in variant.get('options', {}).get('options', []):
             attr_id = option.get('attribute_id')
@@ -245,17 +254,35 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
         if not default_assigned and price_impact == 0:
             is_default = 1
             default_assigned = True
+        
+        # Usar siempre la imagen principal del producto (posición 1) para todas las combinaciones
+        image_position = 1
             
         all_combinations.append({
-            'Product ID*': numeric_product_id, 'Attribute (Name:Type:Position)*': attributes_header,
-            'Value (Value:Position)*': values_str, 'Reference': variant.get('ref', ''), 'EAN13': variant.get('ean', ''),
-            'Impact on price': price_impact, 'Default (0 = No, 1 = Yes)': is_default, 'Image URLs (x,y,z...)': '',
-            'Supplier reference': '', 'UPC': '', 'Wholesale price': '', 'Ecotax': 0, 'Quantity': 100,
-            'Minimal quantity': 1, 'Low stock level': '', 'Impact on weight': 0, 'Combination available date': '',
-            'Image position': image_position, 'Image alt texts (x,y,z...)': '', 'ID / Name of shop': 1,
-            'Advanced Stock Managment': 0, 'Depends on stock': 0, 'Warehouse': 0
+            'Id del Producto': numeric_product_id, 
+            'Referencia del Producto': '', 
+            'Atributo (Nombre:Tipo:Posicion)*': attributes_header,
+            'Valor (Valor:Posicion)*': values_str, 
+            'Ref proveedor': '', 
+            'Referencia': variant.get('ref', ''), 
+            'EAN13': variant.get('ean', ''),
+            'UPC': '', 
+            'MPN': '',
+            'Precio de coste': '', 
+            'Impacto en el precio': price_impact, 
+            'Ecotasa': 0,
+            'Cantidad': 100,
+            'Cantidad minima': 1, 
+            'Nivel de stock bajo': '', 
+            'Enviame un mensaje de correo electronico': '',
+            'Impacto en el peso': 0, 
+            'Predeterminado (0=No, 1=Si)': is_default, 
+            'Fecha de disponibilidad de la combinacion': '',
+            'Elegir entre imagenes de productos por posicion(1,2,3)': image_position, 
+            'URLs de las imagenes(x,y,z...)': main_image_url, 
+            'Textos alternativos de imagen(x,y,z...)': '', 
+            'Id / Nombre de la tienda': 1
         })
-        image_position += 1  # Incrementar posición para siguiente combinación
     return all_combinations
 
 # ================================
@@ -287,7 +314,7 @@ def main():
         print(f"\n🕷️ PASO 2: Procesando productos (formato PrestaShop)...")
         for i, product_info in enumerate(product_urls_with_context, 1):
             product_url = product_info['url']
-            numeric_product_id = 99 + i  # Empezar desde 100 (99+1=100)
+            numeric_product_id = 86 + i  # Empezar desde 87 (86+1=87)
             print(f"  [{i}/{len(product_urls_with_context)}] Procesando: {product_url} (ID: {numeric_product_id})")
             
             try:
