@@ -22,8 +22,12 @@ def clean_html_text(text):
         return ""
     # Convertir a string si no lo es
     text = str(text)
+    
+    # Reemplazar &nbsp; por espacios normales
+    cleaned = text.replace('&nbsp;', ' ')
+    
     # Remover caracteres HTML y problemáticos
-    cleaned = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    cleaned = cleaned.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
     # Remover comillas dobles y punto y coma que rompen CSV
     cleaned = cleaned.replace('"', '').replace(';', ',')
     # Remover otros caracteres problemáticos
@@ -141,6 +145,11 @@ def extract_product_data(nuxt_data, numeric_product_id):
         prices = product_data.get('prices', {})
         seo_data = product_data.get('seo', {})
         technical_data = nuxt_data['state']['product'].get('technical_data', [])
+        
+        # Extraer complementos (espejos, grifos, etc.)
+        configuration = nuxt_data.get('state', {}).get('product', {}).get('configuration', {})
+        complements = configuration.get('options', {}).get('complements', [])
+        
     except (KeyError, TypeError): 
         return None
 
@@ -160,8 +169,20 @@ def extract_product_data(nuxt_data, numeric_product_id):
     # Codificar las comas dentro de las URLs para evitar confusión con separadores
     image_urls = ",".join([f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{img['public_id']}" for img in images_list])
     
+    # Extraer características técnicas
     features_list = [f"{clean_html_text(item['attribute']['name'])}:{clean_html_text(item['options'][0]['option']['value_string'])}:{item.get('position', 0)}"
                      for item in technical_data if item.get('attribute') and item.get('options')]
+    
+    # Añadir complementos como características adicionales
+    if complements:
+        for complement_group in complements:
+            group_name = complement_group.get('name', 'Complementos')
+            options = complement_group.get('options', [])
+            if options:
+                complement_names = [opt.get('name', '') for opt in options if opt.get('name')]
+                if complement_names:
+                    # Añadir como una característica especial
+                    features_list.append(f"{clean_html_text(group_name)}:Disponible ({', '.join(complement_names[:3])}):999")
 
     tags = list(set([word.lower() for word in re.split(r'\s|,', product_data.get('name', '')) if len(word) > 3]))
     tags.append("muebles")
@@ -228,13 +249,59 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
             # Usar la primera imagen con URL codificada
             main_image_url = f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{images_list[0]['public_id']}"
         
-    except (KeyError, TypeError): return []
+    except (KeyError, TypeError) as e:
+        print(f"    ❌ Error extrayendo combinaciones: {e}")
+        return []
 
-    # Crear mapping de atributos
+    # Crear mapping de atributos de forma más directa desde las variantes
+    # Examinar la primera variante para obtener los IDs y nombres de atributos
     attribute_mapping = {}
-    if variants and 'options' in variants[0] and 'options' in variants[0]['options']:
-        for index, option in enumerate(variants[0]['options']['options']):
-            attribute_mapping[option['attribute_id']] = {"name": f"Attribute_{index+1}", "type": "select", "position": index}
+    if variants and len(variants) > 0:
+        first_variant = variants[0]
+        if 'options' in first_variant and 'options' in first_variant['options']:
+            options_list = first_variant['options']['options']
+            
+            # Para cada opción en la primera variante, extraer información del atributo
+            for index, option in enumerate(options_list):
+                attr_id = option.get('attribute_id')
+                if not attr_id:
+                    continue
+                
+                # Intentar múltiples formas de obtener el nombre del atributo
+                friendly_name = None
+                
+                # Método 1: Buscar en toda la lista de variantes un campo "attribute" con nombre
+                for variant in variants[:5]:  # Revisar las primeras 5 variantes
+                    for opt in variant.get('options', {}).get('options', []):
+                        if opt.get('attribute_id') == attr_id:
+                            # Intentar extraer nombre de diferentes ubicaciones
+                            if 'attribute' in opt and isinstance(opt['attribute'], dict):
+                                attr_name = opt['attribute'].get('name') or opt['attribute'].get('label')
+                                if attr_name:
+                                    friendly_name = clean_html_text(attr_name)
+                                    break
+                            # Intentar desde attribute_name
+                            if not friendly_name and 'attribute_name' in opt:
+                                friendly_name = clean_html_text(opt['attribute_name'])
+                                break
+                    if friendly_name:
+                        break
+                
+                # Si no se encontró nombre, usar valor por defecto descriptivo
+                if not friendly_name:
+                    # Intentar inferir del tipo de valores (si son medidas, colores, etc.)
+                    sample_value = option.get('name', '').lower()
+                    if any(unit in sample_value for unit in ['cm', 'mm', 'm ']):
+                        friendly_name = "Medida"
+                    elif any(color in sample_value for color in ['blanco', 'negro', 'gris', 'azul', 'rojo', 'verde', 'amarillo', 'nogal', 'roble', 'wengue', 'antracita']):
+                        friendly_name = "Acabado"
+                    elif 'espejo' in sample_value:
+                        friendly_name = "Espejo"
+                    else:
+                        friendly_name = f"Opción {index+1}"
+                
+                attribute_mapping[attr_id] = {"name": friendly_name, "type": "select", "position": index}
+    
     attributes_header = ",".join([f"{v['name']}:{v['type']}:{v['position']}" for v in attribute_mapping.values()])
 
     default_assigned = False
