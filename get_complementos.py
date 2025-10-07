@@ -343,7 +343,13 @@ def convert_complement_to_prestashop_format(complement_data, prestashop_id):
     name = complement_data.get('name', '')
     ref = complement_data.get('ref', '')
     slug = complement_data.get('slug', '')
-    complement_type_name = complement_data.get('complement_type_name', 'Complemento')
+    
+    # El tipo de complemento viene en el campo 'complement_type' como objeto
+    complement_type = complement_data.get('complement_type', {})
+    if isinstance(complement_type, dict):
+        complement_type_name = complement_type.get('name', 'Complemento')
+    else:
+        complement_type_name = 'Complemento'
     
     # Precios (vienen en centavos en la API)
     price_cents = complement_data.get('price', 0)  # precio con descuento
