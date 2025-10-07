@@ -2,6 +2,7 @@ import json
 import csv
 import re
 import time
+import os
 from datetime import datetime
 from ftplib import FTP
 from selenium import webdriver
@@ -367,6 +368,7 @@ def main():
     driver = None
     all_products_data = []
     all_combinations_data = []
+    product_uuid_list = []  # Lista de (numeric_id, uuid) para luego obtener complementos
     
     try:
         # PASO 1: Obtener todas las URLs de productos
@@ -377,41 +379,153 @@ def main():
         product_urls_with_context = get_all_product_urls_from_brand(driver, BRAND_URL_TO_SCRAPE)
         print(f"✅ Se encontraron {len(product_urls_with_context)} productos")
         
-        # PASO 2: Procesar cada producto
-        print(f"\n🕷️ PASO 2: Procesando productos (formato PrestaShop)...")
+        # PASO 2: UNA SOLA VISITA - Extraer productos + combinaciones + UUIDs
+        print(f"\n🕷️ PASO 2: Procesando productos y recopilando UUIDs (1 VISITA por producto)...")
         for i, product_info in enumerate(product_urls_with_context, 1):
             product_url = product_info['url']
             numeric_product_id = 86 + i  # Empezar desde 87 (86+1=87)
-            print(f"  [{i}/{len(product_urls_with_context)}] Procesando: {product_url} (ID: {numeric_product_id})")
+            print(f"  [{i}/{len(product_urls_with_context)}] {product_url} (ID: {numeric_product_id})")
             
             try:
                 driver.get(product_url)
                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "__nuxt")))
                 nuxt_data = driver.execute_script("return window.__NUXT__;")
                 
-                # Extraer datos del producto con ID numérico
+                # Obtener UUID del producto (usamos 'id' que es el UUID en __NUXT__)
+                try:
+                    product_uuid = nuxt_data['state']['product']['product']['id']
+                except:
+                    product_uuid = ''
+                
+                # Guardar UUID para luego obtener complementos
+                if product_uuid:
+                    product_uuid_list.append((numeric_product_id, product_uuid))
+                
+                # Extraer datos del producto (SIN mapeo de complementos aún, lo haremos después)
                 product_data = extract_product_data(nuxt_data, numeric_product_id)
                 if product_data:
                     all_products_data.append(product_data)
-                    print(f"    ✅ Producto {i} procesado exitosamente (ID: {numeric_product_id})")
+                    print(f"    ✅ Producto procesado (UUID: {product_uuid[:8]}...)")
                 else:
-                    print(f"    ⚠️  No se pudieron extraer datos del producto {i}")
+                    print(f"    ⚠️  No se pudieron extraer datos del producto")
                 
-                # Extraer combinaciones con ID numérico
+                # Extraer combinaciones
                 combinations_data = extract_combinations_data(nuxt_data, numeric_product_id)
                 if combinations_data:
                     all_combinations_data.extend(combinations_data)
                     print(f"    ✅ {len(combinations_data)} combinaciones extraídas")
                 
             except Exception as e:
-                print(f"    ❌ Error procesando producto {i}: {e}")
-                print(f"    🔄 Continuando con el siguiente producto...")
+                print(f"    ❌ Error: {e}")
                 continue
             
             time.sleep(1)  # Pausa entre productos
         
-        # PASO 3: Generar CSVs
-        print(f"\n📄 PASO 3: Generando archivos CSV...")
+        # PASO 3: Obtener complementos de todos los productos vía API
+        print(f"\n🔧 PASO 3: Obteniendo complementos de {len(product_uuid_list)} productos vía API...")
+        
+        unique_complements = {}
+        uuid_to_unique_key = {}
+        product_to_complement_uuids = {}
+        
+        from get_complementos import get_complement_types, get_complements_by_type, generate_unique_key
+        
+        for i, (numeric_id, product_uuid) in enumerate(product_uuid_list, 1):
+            print(f"  [{i}/{len(product_uuid_list)}] Producto ID {numeric_id} (UUID: {product_uuid[:8]}...)")
+            
+            try:
+                complement_types_data = get_complement_types(product_uuid)
+                
+                if not complement_types_data:
+                    continue
+                
+                product_complement_ids = []
+                
+                for comp_type in complement_types_data:
+                    comp_type_id = comp_type.get('id', '')
+                    comp_type_name = comp_type.get('web_name', 'Unknown')
+                    
+                    complements_list = get_complements_by_type(product_uuid, comp_type_id)
+                    
+                    if complements_list:
+                        print(f"      - {comp_type_name}: {len(complements_list)} items")
+                    
+                    for complement in complements_list:
+                        unique_key, key_type = generate_unique_key(complement)
+                        comp_uuid = complement.get('id', '') or complement.get('uuid', '')
+                        
+                        if unique_key not in unique_complements:
+                            unique_complements[unique_key] = complement
+                            uuid_to_unique_key[comp_uuid] = unique_key
+                        else:
+                            uuid_to_unique_key[comp_uuid] = unique_key
+                        
+                        product_complement_ids.append(comp_uuid)
+                
+                if product_complement_ids:
+                    product_to_complement_uuids[product_uuid] = product_complement_ids
+                    print(f"      ✅ {len(product_complement_ids)} complementos recopilados")
+            
+            except Exception as e:
+                print(f"      ❌ Error: {e}")
+            
+            time.sleep(0.5)
+        
+        print(f"\n✅ Complementos únicos obtenidos: {len(unique_complements)}")
+        
+        # PASO 4: Generar CSV de complementos
+        print(f"\n📄 PASO 4: Generando CSV de complementos...")
+        
+        complement_csv_name = None
+        key_to_prestashop_id = {}
+        
+        if unique_complements:
+            from get_complementos import generate_complements_csv
+            complement_csv_name, key_to_prestashop_id = generate_complements_csv(
+                unique_complements,
+                timestamp
+            )
+            print(f"✅ {complement_csv_name} generado con {len(unique_complements)} complementos (IDs: 5001-{5000+len(unique_complements)})")
+        else:
+            print(f"⚠️  No se encontraron complementos para generar CSV")
+        
+        # PASO 5: Actualizar productos con Accessories
+        print(f"\n🔗 PASO 5: Actualizando productos con Accessories...")
+        
+        for product_data in all_products_data:
+            numeric_id = product_data['Product ID']
+            
+            # Buscar el UUID de este producto
+            product_uuid = None
+            for pid, puuid in product_uuid_list:
+                if pid == numeric_id:
+                    product_uuid = puuid
+                    break
+            
+            if not product_uuid:
+                continue
+            
+            # Obtener complementos de este producto
+            comp_uuids = product_to_complement_uuids.get(product_uuid, [])
+            if not comp_uuids:
+                continue
+            
+            # Mapear UUIDs a IDs de PrestaShop
+            prestashop_ids = []
+            for comp_uuid in comp_uuids:
+                unique_key = uuid_to_unique_key.get(comp_uuid)
+                if unique_key:
+                    ps_id = key_to_prestashop_id.get(unique_key)
+                    if ps_id and str(ps_id) not in prestashop_ids:
+                        prestashop_ids.append(str(ps_id))
+            
+            # Actualizar el campo Accessories
+            if prestashop_ids:
+                product_data['Acessories  (x,y,z...)'] = ",".join(prestashop_ids)
+                print(f"  • Producto ID {numeric_id} → {len(prestashop_ids)} accesorios")
+        
+        # PASO 6: Generar CSVs de productos y combinaciones
+        print(f"\n📄 PASO 6: Generando CSVs de productos y combinaciones...")
         
         if all_products_data:
             with open(PRODUCT_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
@@ -427,30 +541,49 @@ def main():
                 writer.writerows(all_combinations_data)
             print(f"✅ {COMBINATION_OUTPUT_FILENAME} generado ({len(all_combinations_data)} combinaciones)")
         
-        # PASO 4: Subir a FTP
-        print(f"\n📤 PASO 4: Subiendo archivos definitivos al FTP...")
+        # PASO 7: Subir a FTP en el orden correcto
+        print(f"\n📤 PASO 7: Subiendo archivos al FTP...")
         config = leer_configuracion_ftp("ftp_config.txt")
         
         if config:
+            # 1. Primero complementos
+            if complement_csv_name and os.path.exists(complement_csv_name):
+                print(f"  📤 Subiendo {complement_csv_name}...")
+                subir_archivo_ftp(complement_csv_name, config.get("servidor"), 
+                                config.get("usuario"), config.get("contraseña"), 
+                                config.get("ruta_remota", "/"))
+            
+            # 2. Luego productos (con referencias a complementos)
             if all_products_data:
+                print(f"  📤 Subiendo {PRODUCT_OUTPUT_FILENAME}...")
                 subir_archivo_ftp(PRODUCT_OUTPUT_FILENAME, config.get("servidor"), 
                                 config.get("usuario"), config.get("contraseña"), 
                                 config.get("ruta_remota", "/"))
             
+            # 3. Finalmente combinaciones
             if all_combinations_data:
+                print(f"  📤 Subiendo {COMBINATION_OUTPUT_FILENAME}...")
                 subir_archivo_ftp(COMBINATION_OUTPUT_FILENAME, config.get("servidor"), 
                                 config.get("usuario"), config.get("contraseña"), 
                                 config.get("ruta_remota", "/"))
             
-            print(f"\n🎉 PROCESO COMPLETADO: {len(all_products_data)} productos procesados y subidos al FTP!")
+            print(f"\n🎉 PROCESO COMPLETADO!")
+            print(f"   • {len(unique_complements)} complementos")
+            print(f"   • {len(all_products_data)} productos")
+            print(f"   • {len(all_combinations_data)} combinaciones")
+            print(f"   Todos los archivos subidos al FTP correctamente!")
         else:
             print(f"\n⚠️ Archivos generados pero sin configuración FTP.")
             print(f"📄 Archivos disponibles localmente:")
+            if complement_csv_name:
+                print(f"   • {complement_csv_name}")
             print(f"   • {PRODUCT_OUTPUT_FILENAME}")
             print(f"   • {COMBINATION_OUTPUT_FILENAME}")
     
     except Exception as e:
         print(f"❌ Error en el proceso: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         if driver:
             driver.quit()
