@@ -503,7 +503,7 @@ def generate_complements_csv(unique_complements, timestamp):
     # Escribir CSV
     if all_complements_data:
         with open(filename, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_ALL)
+            writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_NONNUMERIC)
             writer.writeheader()
             writer.writerows(all_complements_data)
         

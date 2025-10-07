@@ -559,14 +559,14 @@ def main():
         
         if all_products_data:
             with open(PRODUCT_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_ALL)
+                writer = csv.DictWriter(f, fieldnames=PRODUCT_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_NONNUMERIC)
                 writer.writeheader()
                 writer.writerows(all_products_data)
             print(f"✅ {PRODUCT_OUTPUT_FILENAME} generado ({len(all_products_data)} productos)")
         
         if all_combinations_data:
             with open(COMBINATION_OUTPUT_FILENAME, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=COMBINATION_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_ALL)
+                writer = csv.DictWriter(f, fieldnames=COMBINATION_CSV_HEADERS, delimiter=';', quoting=csv.QUOTE_NONNUMERIC)
                 writer.writeheader()
                 writer.writerows(all_combinations_data)
             print(f"✅ {COMBINATION_OUTPUT_FILENAME} generado ({len(all_combinations_data)} combinaciones)")
