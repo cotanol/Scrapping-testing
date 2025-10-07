@@ -140,7 +140,7 @@ def subir_archivo_ftp(nombre_archivo, servidor, usuario, contraseña, ruta_remot
 # ================================
 # 2. EXTRACCIÓN DATOS PRESTASHOP
 # ================================
-def extract_product_data(nuxt_data, numeric_product_id):
+def extract_product_data(nuxt_data, numeric_product_id, driver=None):
     try:
         product_data = nuxt_data['state']['product']['product']
         prices = product_data.get('prices', {})
@@ -157,8 +157,38 @@ def extract_product_data(nuxt_data, numeric_product_id):
     tech_data_map = {item['attribute']['name'].lower(): item['options'][0]['option']['value_string'] 
                      for item in technical_data if item.get('attribute') and item.get('options')}
     
-    price_final = prices.get('pvp_web', 0) / 100
-    price_tax_excluded = round(price_final / TAX_RATE, 6) if price_final > 0 else 0
+    # EXTRAER PRECIO VISUAL DEL HTML (precio con IVA que se muestra en la web)
+    price_with_tax = 0
+    if driver:
+        try:
+            # Selector específico de Decorabano para el precio (clase "price")
+            price_element = driver.find_element(By.CSS_SELECTOR, "span.price")
+            price_text = price_element.text.strip()
+            
+            # Extraer número del texto (ej: "390,03€" → 390.03)
+            # Reemplazar separador de miles (.) y decimal (,) al formato estándar
+            price_text_clean = price_text.replace('€', '').strip()
+            
+            # Si tiene punto como separador de miles y coma como decimal: "1.234,56" → "1234.56"
+            if ',' in price_text_clean and '.' in price_text_clean:
+                price_text_clean = price_text_clean.replace('.', '').replace(',', '.')
+            # Si solo tiene coma como decimal: "390,03" → "390.03"
+            elif ',' in price_text_clean:
+                price_text_clean = price_text_clean.replace(',', '.')
+            
+            price_with_tax = float(price_text_clean)
+            print(f"    💰 Precio extraído del HTML: {price_with_tax}€ (con IVA)")
+        except Exception as e:
+            print(f"    ⚠️  No se pudo extraer precio visual, usando pvp_web del __NUXT__")
+    
+    # Si se obtuvo precio visual (con IVA), calcular precio sin IVA
+    if price_with_tax > 0:
+        price_tax_excluded = round(price_with_tax / TAX_RATE, 6)
+        price_final = price_with_tax  # Para cálculo de descuentos
+    else:
+        # Fallback: usar precio del __NUXT__
+        price_final = prices.get('pvp_web', 0) / 100
+        price_tax_excluded = round(price_final / TAX_RATE, 6) if price_final > 0 else 0
     
     on_sale = 1 if prices.get('pvp_supplier', 0) > prices.get('pvp_web', 0) else 0
     discount_amount = round((prices.get('pvp_supplier', 0) - prices.get('pvp_web', 0)) / 100, 2) if on_sale else 0
@@ -401,8 +431,8 @@ def main():
                 if product_uuid:
                     product_uuid_list.append((numeric_product_id, product_uuid))
                 
-                # Extraer datos del producto (SIN mapeo de complementos aún, lo haremos después)
-                product_data = extract_product_data(nuxt_data, numeric_product_id)
+                # Extraer datos del producto (PASAMOS driver para obtener precio visual)
+                product_data = extract_product_data(nuxt_data, numeric_product_id, driver)
                 if product_data:
                     all_products_data.append(product_data)
                     print(f"    ✅ Producto procesado (UUID: {product_uuid[:8]}...)")
@@ -485,7 +515,7 @@ def main():
                 unique_complements,
                 timestamp
             )
-            print(f"✅ {complement_csv_name} generado con {len(unique_complements)} complementos (IDs: 5001-{5000+len(unique_complements)})")
+            print(f"✅ {complement_csv_name} generado con {len(unique_complements)} complementos (IDs: 136-{135+len(unique_complements)})")
         else:
             print(f"⚠️  No se encontraron complementos para generar CSV")
         

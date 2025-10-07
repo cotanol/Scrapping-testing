@@ -17,7 +17,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # CONFIGURACIÓN
 # ================================
 TAX_RATE = 1.21
-COMPLEMENT_START_ID = 5001  # IDs de PrestaShop para complementos
+COMPLEMENT_START_ID = 136  # IDs de PrestaShop para complementos (136-208 = 73 complementos)
 
 # Mapeo de tipos de complementos a categorías de PrestaShop (según imagen)
 COMPLEMENT_CATEGORY_MAP = {
