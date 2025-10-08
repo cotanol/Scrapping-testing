@@ -157,27 +157,35 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
     tech_data_map = {item['attribute']['name'].lower(): item['options'][0]['option']['value_string'] 
                      for item in technical_data if item.get('attribute') and item.get('options')}
     
-    # EXTRAER PRECIO VISUAL DEL HTML (precio con IVA que se muestra en la web)
+    # EXTRAER PRECIO VISUAL DEL HTML (precio ORIGINAL sin descuento, para que PrestaShop aplique el descuento)
     price_with_tax = 0
     if driver:
         try:
-            # Selector específico de Decorabano para el precio (clase "price")
-            price_element = driver.find_element(By.CSS_SELECTOR, "span.price")
-            price_text = price_element.text.strip()
+            # Primero intentar obtener el precio TACHADO (precio original sin descuento)
+            # Este es el precio que debe ir en "Price tax excluded" para que PrestaShop aplique el descuento
+            try:
+                original_price_element = driver.find_element(By.CSS_SELECTOR, "span.line-through")
+                price_text = original_price_element.text.strip()
+                print(f"    🏷️  Precio ORIGINAL (tachado) encontrado: {price_text}")
+            except:
+                # Si no hay precio tachado, usar el precio normal (producto sin descuento)
+                price_element = driver.find_element(By.CSS_SELECTOR, "span.price")
+                price_text = price_element.text.strip()
+                print(f"    💰 Precio (sin descuento en web): {price_text}")
             
-            # Extraer número del texto (ej: "390,03€" → 390.03)
+            # Extraer número del texto (ej: "609,84€" → 609.84)
             # Reemplazar separador de miles (.) y decimal (,) al formato estándar
             price_text_clean = price_text.replace('€', '').strip()
             
             # Si tiene punto como separador de miles y coma como decimal: "1.234,56" → "1234.56"
             if ',' in price_text_clean and '.' in price_text_clean:
                 price_text_clean = price_text_clean.replace('.', '').replace(',', '.')
-            # Si solo tiene coma como decimal: "390,03" → "390.03"
+            # Si solo tiene coma como decimal: "609,84" → "609.84"
             elif ',' in price_text_clean:
                 price_text_clean = price_text_clean.replace(',', '.')
             
             price_with_tax = float(price_text_clean)
-            print(f"    💰 Precio extraído del HTML: {price_with_tax}€ (con IVA)")
+            print(f"    💰 Precio extraído (ORIGINAL con IVA): {price_with_tax}€")
         except Exception as e:
             print(f"    ⚠️  No se pudo extraer precio visual, usando pvp_web del __NUXT__")
     
