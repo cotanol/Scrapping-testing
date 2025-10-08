@@ -197,8 +197,14 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
     categories_str = "13"
     
     images_list = product_data.get('images', [])
-    # Codificar las comas dentro de las URLs para evitar confusión con separadores
-    image_urls = ",".join([f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{img['public_id']}" for img in images_list])
+    # Filtrar imagen problemática y generar URLs
+    problematic_image = "products/f96cbc2f-a08e-4832-9d62-8cdeae03c4f2/Vitale_DetallePatas_1668600799.0959315"
+    filtered_images = [
+        f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{img['public_id']}" 
+        for img in images_list 
+        if img['public_id'] != problematic_image
+    ]
+    image_urls = ",".join(filtered_images)
     
     # Extraer características técnicas
     features_list = [f"{clean_html_text(item['attribute']['name'])}:{clean_html_text(item['options'][0]['option']['value_string'])}:{item.get('position', 0)}"
@@ -273,12 +279,17 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
         base_price_cents = product_data.get('prices', {}).get('pvp_web', 0)
         all_combinations = []
         
-        # Obtener la URL de la imagen principal del producto
+        # Obtener la URL de la imagen principal del producto (filtrar imagen problemática)
         images_list = product_data.get('images', [])
         main_image_url = ""
+        problematic_image = "products/f96cbc2f-a08e-4832-9d62-8cdeae03c4f2/Vitale_DetallePatas_1668600799.0959315"
+        
         if images_list:
-            # Usar la primera imagen con URL codificada
-            main_image_url = f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{images_list[0]['public_id']}"
+            # Buscar la primera imagen válida (que no sea la problemática)
+            for img in images_list:
+                if img['public_id'] != problematic_image:
+                    main_image_url = f"https://cdn.todomueblesdebano.com/image/upload/f_auto%2Cq_auto/v1/{img['public_id']}"
+                    break
         
     except (KeyError, TypeError) as e:
         print(f"    ❌ Error extrayendo combinaciones: {e}")
