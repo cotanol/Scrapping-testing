@@ -395,8 +395,8 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
             'Impacto en el peso': 0, 
             'Predeterminado (0=No, 1=Si)': is_default, 
             'Fecha de disponibilidad de la combinacion': '',
-            'Elegir entre imagenes de productos por posicion(1,2,3)': image_position, 
-            'URLs de las imagenes(x,y,z...)': main_image_url, 
+            'Elegir entre imagenes de productos por posicion(1,2,3)': '', 
+            'URLs de las imagenes(x,y,z...)': '', 
             'Textos alternativos de imagen(x,y,z...)': '', 
             'Id / Nombre de la tienda': 1
         })
