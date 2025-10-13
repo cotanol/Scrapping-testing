@@ -214,20 +214,42 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
     ]
     image_urls = ",".join(filtered_images)
     
-    # Extraer características técnicas
-    features_list = [f"{clean_html_text(item['attribute']['name'])}:{clean_html_text(item['options'][0]['option']['value_string'])}:{item.get('position', 0)}"
-                     for item in technical_data if item.get('attribute') and item.get('options')]
+    # Extraer características técnicas (DEDUPLICADAS por nombre de atributo)
+    features_dict = {}
+    for item in technical_data:
+        if item.get('attribute') and item.get('options'):
+            attr_name = clean_html_text(item['attribute']['name'])
+            attr_value = clean_html_text(item['options'][0]['option']['value_string'])
+            position = item.get('position', 0)
+            
+            # Validar que el nombre del atributo no esté vacío y sea válido
+            if not attr_name or len(attr_name) < 2:
+                continue
+            
+            # Validar que el valor no esté vacío
+            if not attr_value:
+                continue
+            
+            # Solo añadir si no existe, para evitar duplicados
+            if attr_name not in features_dict:
+                features_dict[attr_name] = f"{attr_name}:{attr_value}:{position}"
     
-    # Añadir complementos como características adicionales
+    features_list = list(features_dict.values())
+    
+    # Añadir complementos como características adicionales (sin duplicados)
+    complement_features = {}
     if complements:
         for complement_group in complements:
-            group_name = complement_group.get('name', 'Complementos')
+            group_name = clean_html_text(complement_group.get('name', 'Complementos'))
             options = complement_group.get('options', [])
-            if options:
+            if options and group_name not in complement_features:
                 complement_names = [opt.get('name', '') for opt in options if opt.get('name')]
                 if complement_names:
                     # Añadir como una característica especial
-                    features_list.append(f"{clean_html_text(group_name)}:Disponible ({', '.join(complement_names[:3])}):999")
+                    complement_features[group_name] = f"{group_name}:Disponible ({', '.join(complement_names[:3])}):999"
+    
+    # Combinar características técnicas y complementos
+    features_list.extend(complement_features.values())
 
     tags = list(set([word.lower() for word in re.split(r'\s|,', product_data.get('name', '')) if len(word) > 3]))
     tags.append("muebles")
@@ -282,7 +304,7 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
         'URL rewritten': url_slug, 'Text when in stock': 'Disponible', 'Text when backorder allowed': '',
         'Available for order (0 = No, 1 = Yes)': 1, 'Product available date': '', 'Product creation date': '',
         'Show price (0 = No, 1 = Yes)': 1, 'Image URLs (x,y,z...)': image_urls, 'Image alt texts (x,y,z...)': '',
-        'Delete existing images (0 = No, 1 = Yes)': 1, 'Feature(Name:Value:Position)': ";".join(features_list),
+        'Delete existing images (0 = No, 1 = Yes)': 1, 'Feature(Name:Value:Position)': "|".join(features_list),
         'Available online only (0 = No, 1 = Yes)': 0, 'Condition': 'new', 'Customizable (0 = No, 1 = Yes)': 0,
         'Uploadable files (0 = No, 1 = Yes)': 0, 'Text fields (0 = No, 1 = Yes)': 0, 'Out of stock action': 0,
         'Virtual product': 0 if not file_url else 1, 'File URL': file_url, 'Number of allowed downloads': '', 'Expiration date': '',
