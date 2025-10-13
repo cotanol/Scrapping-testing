@@ -245,10 +245,22 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
     if url_slug and len(url_slug) > 128:
         url_slug = url_slug[:128]
 
-    # Limitar Summary (description_short) a 800 caracteres máximo
-    summary_text = seo_data.get('short_description', '') or ''
-    if summary_text and len(summary_text) > 800:
-        summary_text = summary_text[:800] + '...'
+    # Construir Summary a partir de sub_name + differential_values
+    sub_name = product_data.get('sub_name', '')
+    differential_values = seo_data.get('differential_values', '')
+    
+    # Combinar sub_name y differential_values con coma
+    if sub_name and differential_values:
+        summary_text = f"{sub_name}, {differential_values}"
+    elif sub_name:
+        summary_text = sub_name
+    elif differential_values:
+        summary_text = differential_values
+    else:
+        # Fallback a short_description si no hay sub_name ni differential_values
+        summary_text = seo_data.get('short_description', '') or ''
+        if summary_text and len(summary_text) > 800:
+            summary_text = summary_text[:800] + '...'
 
     return {
         'Product ID': numeric_product_id, 'Active (0/1)': 1, 'Name *': clean_html_text(product_data.get('name', '')),
