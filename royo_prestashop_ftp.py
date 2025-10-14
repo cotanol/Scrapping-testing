@@ -21,19 +21,14 @@ def clean_html_text(text):
     """Limpia texto HTML removiendo saltos de línea y caracteres problemáticos para CSV"""
     if not text or text is None:
         return ""
-    # Convertir a string si no lo es
     text = str(text)
-    
-    # Reemplazar &nbsp; por espacios normales
     cleaned = text.replace('&nbsp;', ' ')
-    
-    # Remover caracteres HTML y problemáticos
     cleaned = cleaned.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-    # Remover comillas dobles y punto y coma que rompen CSV
-    cleaned = cleaned.replace('"', '').replace(';', ',')
-    # Remover otros caracteres problemáticos
+    
+    # ¡OJO! Corregido para no reintroducir comas.
+    cleaned = cleaned.replace('"', '').replace(';', ' ') 
+
     cleaned = cleaned.replace('|', '-').replace('\x00', '').replace('\x0b', '').replace('\x0c', '')
-    # Remover espacios múltiples
     cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned.strip()
 
@@ -214,42 +209,72 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
     ]
     image_urls = ",".join(filtered_images)
     
-    # Extraer características técnicas (DEDUPLICADAS por nombre de atributo)
+     # 1. Inicializa un diccionario único para DEDUPLICAR todas las características
     features_dict = {}
+
+    # 2. Procesa las CARACTERÍSTICAS TÉCNICAS y las añade al diccionario
     for item in technical_data:
         if item.get('attribute') and item.get('options'):
             attr_name = clean_html_text(item['attribute']['name'])
             attr_value = clean_html_text(item['options'][0]['option']['value_string'])
             position = item.get('position', 0)
             
-            # Validar que el nombre del atributo no esté vacío y sea válido
-            if not attr_name or len(attr_name) < 2:
+            if not attr_name or len(attr_name) < 2 or not attr_value:
                 continue
             
-            # Validar que el valor no esté vacío
-            if not attr_value:
-                continue
+            # Reemplaza comas por puntos para evitar conflictos
+            attr_name_clean = attr_name.replace(',', '.')
+            attr_value_clean = attr_value.replace(',', '.')
             
-            # Solo añadir si no existe, para evitar duplicados
-            if attr_name not in features_dict:
-                features_dict[attr_name] = f"{attr_name}:{attr_value}:{position}"
-    
+            # Añade al diccionario solo si no existe ya (evita duplicados)
+            if attr_name_clean not in features_dict:
+                features_dict[attr_name_clean] = f"{attr_name_clean}:{attr_value_clean}:{position}"
+
+    # 3. Procesa los COMPLEMENTOS y los añade al MISMO diccionario
+    if complements:
+        for complement_group in complements:
+            group_name = clean_html_text(complement_group.get('name', 'Complementos'))
+            group_name_clean = group_name.replace(',', '.')
+            options = complement_group.get('options', [])
+            
+            # Revisa que no exista ya la característica del complemento
+            if options and group_name_clean not in features_dict:
+                complement_names = [opt.get('name', '').replace(',', '.') for opt in options if opt.get('name')]
+                if complement_names:
+                    # Une los nombres con un guion para no usar comas
+                    complement_names_str = ' - '.join(complement_names[:3]) 
+                    features_dict[group_name_clean] = f"{group_name_clean}:Disponible ({complement_names_str}):999"
+
+    # 4. Crea la LISTA FINAL a partir del diccionario unificado
     features_list = list(features_dict.values())
-    
+
     # Añadir complementos como características adicionales (sin duplicados)
     complement_features = {}
     if complements:
         for complement_group in complements:
             group_name = clean_html_text(complement_group.get('name', 'Complementos'))
+            group_name_clean = group_name.replace(',', '.')
             options = complement_group.get('options', [])
-            if options and group_name not in complement_features:
-                complement_names = [opt.get('name', '') for opt in options if opt.get('name')]
+            if options and group_name_clean not in complement_features:
+                complement_names = [opt.get('name', '').replace(',', '.') for opt in options if opt.get('name')]
                 if complement_names:
-                    # Añadir como una característica especial
-                    complement_features[group_name] = f"{group_name}:Disponible ({', '.join(complement_names[:3])}):999"
-    
-    # Combinar características técnicas y complementos
+                    complement_features[group_name_clean] = f"{group_name_clean}:Disponible ({', '.join(complement_names[:3])}):999"
     features_list.extend(complement_features.values())
+    for item in technical_data:
+        if item.get('attribute') and item.get('options'):
+            attr_name = clean_html_text(item['attribute']['name'])
+            attr_value = clean_html_text(item['options'][0]['option']['value_string'])
+            position = item.get('position', 0)
+            if not attr_name or len(attr_name) < 2 or not attr_value:
+                continue
+            
+            # Reemplazar comas internas por '.' (punto)
+            attr_name_clean = attr_name.replace(',', '.')
+            attr_value_clean = attr_value.replace(',', '.')
+            
+            if attr_name_clean not in features_dict:
+                features_dict[attr_name_clean] = f"{attr_name_clean}:{attr_value_clean}:{position}"
+    features_list = list(features_dict.values())
 
     tags = list(set([word.lower() for word in re.split(r'\s|,', product_data.get('name', '')) if len(word) > 3]))
     tags.append("muebles")
@@ -304,7 +329,7 @@ def extract_product_data(nuxt_data, numeric_product_id, driver=None):
         'URL rewritten': url_slug, 'Text when in stock': 'Disponible', 'Text when backorder allowed': '',
         'Available for order (0 = No, 1 = Yes)': 1, 'Product available date': '', 'Product creation date': '',
         'Show price (0 = No, 1 = Yes)': 1, 'Image URLs (x,y,z...)': image_urls, 'Image alt texts (x,y,z...)': '',
-        'Delete existing images (0 = No, 1 = Yes)': 1, 'Feature(Name:Value:Position)': "|".join(features_list),
+        'Delete existing images (0 = No, 1 = Yes)': 1, 'Feature(Name:Value:Position)': ",".join(features_list),
         'Available online only (0 = No, 1 = Yes)': 0, 'Condition': 'new', 'Customizable (0 = No, 1 = Yes)': 0,
         'Uploadable files (0 = No, 1 = Yes)': 0, 'Text fields (0 = No, 1 = Yes)': 0, 'Out of stock action': 0,
         'Virtual product': 0 if not file_url else 1, 'File URL': file_url, 'Number of allowed downloads': '', 'Expiration date': '',
@@ -378,7 +403,7 @@ def extract_combinations_data(nuxt_data, numeric_product_id):
                     if any(unit in sample_value for unit in ['cm', 'mm', 'm ']):
                         friendly_name = "Medida"
                     elif any(color in sample_value for color in ['blanco', 'negro', 'gris', 'azul', 'rojo', 'verde', 'amarillo', 'nogal', 'roble', 'wengue', 'antracita']):
-                        friendly_name = "Acabado"
+                        friendly_name = "Color"
                     elif 'espejo' in sample_value:
                         friendly_name = "Espejo"
                     else:
